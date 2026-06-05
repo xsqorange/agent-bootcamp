@@ -1,0 +1,24 @@
+{
+    "java.home": "C:/Users/Admin/.jdks/corretto-17.0.17",
+    "java.configuration.runtimes": [
+        {
+            "name": "JavaSE-17",
+            "path": "C:/Users/Admin/.jdks/corretto-17.0.17",
+            "default": true
+        }
+    ],
+    "maven.executable.path": "./mvnw",
+    "maven.terminal.useJavaHome": true,
+    "java.compile.nullAnalysis.mode": "automatic",
+    "editor.formatOnSave": true,
+    "files.encoding": "utf8",
+    "[java]": {
+        "editor.defaultFormatter": "redhat.java",
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true
+    },
+    "terminal.integrated.env.windows": {
+        "JAVA_HOME": "C:/Users/Admin/.jdks/corretto-17.0.17"
+    },
+    "github-actions.workflows.pinned.active": true
+}

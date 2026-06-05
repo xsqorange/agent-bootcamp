@@ -1,0 +1,49 @@
+# Compiled output / 编译产物
+target/
+*.class
+*.jar
+*.war
+
+# IDE — IntelliJ IDEA / IntelliJ
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# IDE — VSCode / VSCode
+.vscode/launch.json.bak
+
+# IDE — Eclipse / Eclipse
+.project
+.classpath
+.settings/
+bin/
+
+# Logs / 日志
+*.log
+logs/
+trace.jsonl
+
+# OS / 系统
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Secrets / 密钥 — 千万不要提交!
+.env
+.env.local
+*.key
+*.pem
+
+# Maven wrapper (we commit it actually, only ignore download cache) / 提交 wrapper 但忽略下载缓存
+.mvn/wrapper/maven-wrapper.jar.lck
+
+# Test reports / 测试报告
+target/surefire-reports/
+target/jacoco.exec
+
+# Editor swap files / 编辑器临时文件
+*.swp
+*.swo
+*~

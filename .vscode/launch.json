@@ -1,0 +1,39 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "java",
+            "name": "Run Agent (Day 1 smoke test)",
+            "request": "launch",
+            "mainClass": "com.agentbootcamp.Main",
+            "projectName": "agent-bootcamp",
+            "args": [
+                "--goal",
+                "List all .java files under src/"
+            ],
+            "env": {
+                "LLM_BASE_URL": "https://api.deepseek.com/v1",
+                "LLM_MODEL": "deepseek-chat"
+            }
+        },
+        {
+            "type": "java",
+            "name": "Run with explicit goal",
+            "request": "launch",
+            "mainClass": "com.agentbootcamp.Main",
+            "projectName": "agent-bootcamp",
+            "args": [
+                "--goal",
+                "${input:goal}"
+            ]
+        }
+    ],
+    "inputs": [
+        {
+            "id": "goal",
+            "type": "promptString",
+            "description": "What do you want the agent to do?",
+            "default": "Read the README.md and summarize it in one sentence"
+        }
+    ]
+}
