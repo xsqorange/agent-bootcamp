@@ -45,7 +45,7 @@
 
 ```bash
 # 克隆 / clone
-git clone https://github.com/xuesq3/agent-bootcamp.git
+git clone https://github.com/xsqorange/agent-bootcamp.git
 cd agent-bootcamp
 
 # 配置 API key / configure API key
@@ -151,7 +151,7 @@ export LLM_MODEL="deepseek-chat"
 
 | Day | 日期 | 完成情况 | 笔记 |
 |---|---|---|---|
-| 1 | 2026-06-05 | ✅ 项目骨架 + LlmClient + 3 tools | 第一次 LLM 调用跑通 |
+| 1 | 2026-06-05 | ✅ 项目骨架 + LlmClient + 3 tools | 推到 GitHub: `xsqorange/agent-bootcamp` |
 
 ## 贡献 / Contributing
 
@@ -162,7 +162,14 @@ export LLM_MODEL="deepseek-chat"
 
 ## 许可证 / License
 
-[MIT](LICENSE) © 2026 码力全开 (xuesq3)
+[MIT](LICENSE) © 2026 码力全开 (xsqorange)
+
+## 作者 / Author
+
+**码力全开** — Java/Spring 工程师转 Agent 开发
+- GitHub: [@xsqorange](https://github.com/xsqorange)
+- Email: `xsqorange@gmail.com`
+- 学习路径: [`agent-dev-crash-course`](../agent-dev-crash-course) 2 周速成版
 
 ## 致谢 / Acknowledgments
 
