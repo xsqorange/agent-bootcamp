@@ -1,7 +1,7 @@
 package com.agentbootcamp;
 
+import com.agentbootcamp.LlmClient.LlmResponse;
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -12,81 +12,222 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * Agent — ReAct 循环骨架 / ReAct loop skeleton
+ * Agent — ReAct 循环 / ReAct loop (Day 2)
  *
- * Day 1 版本:单次 LLM 调用(不循环)/ Day 1: single LLM call (no loop)
- * Day 2 会改成 while 循环,加 StopReason 和预算控制 / Day 2 will turn into a while loop with StopReason + budget
+ * 心智模型 / Mental model:
+ *   while (没停) {
+ *       思考 = LLM(messages, tools)        // 模型决策
+ *       if (没工具调用) 返回思考.content   // 最终答案
+ *       观察 = 工具们(思考.toolCalls)     // 执行动作
+ *       把观察塞回 messages                // 喂给下一步模型
+ *   }
  *
- * Java 锚定 / Java anchor: ReAct 就是一个 while 循环 + switch
+ * 关键变化(Day 1 → Day 2):
+ *  - runOnce()  → run() 返回 RunResult(成本/步数/停止原因)
+ *  - 加了 StopReason 终止条件
+ *  - 加了 TraceWriter,每步写 trace.jsonl
+ *  - 支持一个 step 调多个工具(parallel tool calls)
+ *  - 加了 maxSteps / maxCost 双重护栏
+ *
+ * Java 锚定 / Java anchor:
+ *   Agent = 状态机(messages)+ while 循环 + switch(stopReason)
  */
 public class Agent {
     private static final Logger log = LoggerFactory.getLogger(Agent.class);
 
     private final LlmClient llm;
     private final Map<String, Tool> tools;
+    private final TraceWriter trace;       // 可为 null
+    private final int maxSteps;
+    private final double maxCostUsd;
 
-    public Agent(LlmClient llm, List<Tool> tools) {
+    public Agent(LlmClient llm, List<Tool> tools, TraceWriter trace,
+                 int maxSteps, double maxCostUsd) {
         this.llm = llm;
         this.tools = tools.stream().collect(Collectors.toMap(Tool::name, t -> t));
-        log.info("Agent 初始化: {} 个工具 = {}", tools.size(), this.tools.keySet());
+        this.trace = trace;
+        this.maxSteps = maxSteps;
+        this.maxCostUsd = maxCostUsd;
+        log.info("Agent 初始化: tools={}, maxSteps={}, maxCost=${}",
+            this.tools.keySet(), maxSteps, maxCostUsd);
     }
 
     /**
-     * 单次运行(Day 1 验收用)/ Single run (Day 1 acceptance test)
+     * 完整 ReAct 循环 / Full ReAct loop
      *
-     * Day 2 起会变成这样 / Day 2 will turn this into:
-     * <pre>
-     * for (int step = 0; step < maxSteps; step++) {
-     *     var resp = llm.chat(messages, toolSchemas());
-     *     if (resp.hasToolCall()) { ... 执行工具,追加消息 ... }
-     *     else return resp.content();
-     * }
-     * </pre>
+     * 终止条件(任一):
+     *  - 模型返回纯文本(FINAL_ANSWER)
+     *  - step >= maxSteps (MAX_STEPS)
+     *  - 累计成本 > maxCostUsd (COST_LIMIT)
      */
-    public String runOnce(String userGoal) throws Exception {
+    public RunResult run(String userGoal) throws Exception {
         List<Message> messages = new ArrayList<>();
         messages.add(Message.system(systemPrompt()));
         messages.add(Message.user(userGoal));
 
-        // 第一次 LLM 调用 / first LLM call
-        var resp = llm.chat(messages, toolSchemas());
-        log.info("LLM 回复: content='{}', toolCalls={}, tokens_in={}, tokens_out={}",
-            truncate(resp.content(), 60),
-            resp.hasToolCall() ? resp.toolCalls().size() : 0,
-            resp.tokensIn(), resp.tokensOut());
+        int step = 0;
+        int totalTokensIn = 0;
+        int totalTokensOut = 0;
+        double totalCostUsd = 0.0;
+        StopReason stopReason = null;
+        String finalAnswer = null;
 
-        if (!resp.hasToolCall()) {
-            return resp.content();
+        while (step < maxSteps) {
+            step++;
+            log.info("=== Step {}/{} ===", step, maxSteps);
+
+            // 1. 思考:调 LLM
+            LlmClient.LlmResponse resp = llm.chat(messages, toolSchemas());
+
+            int tokensIn  = resp.tokensIn()  != null ? resp.tokensIn()  : 0;
+            int tokensOut = resp.tokensOut() != null ? resp.tokensOut() : 0;
+            totalTokensIn  += tokensIn;
+            totalTokensOut += tokensOut;
+            totalCostUsd   += estimateCost(tokensIn, tokensOut);
+
+            log.info("LLM 回复: content='{}', toolCalls={}, tokens_in={}, tokens_out={}, cost=${}",
+                truncate(resp.content(), 50),
+                resp.hasToolCall() ? resp.toolCalls().size() : 0,
+                tokensIn, tokensOut, String.format("%.6f", totalCostUsd));
+
+            // 2. 检查:是否最终答案
+            if (!resp.hasToolCall()) {
+                stopReason = StopReason.FINAL_ANSWER;
+                finalAnswer = resp.content();
+                writeTrace(step, userGoal, resp, null, null,
+                    tokensIn, tokensOut, totalTokensIn, totalTokensOut, totalCostUsd,
+                    stopReason, finalAnswer);
+                break;
+            }
+
+            // 3. 行动:执行所有工具调用(支持并行)
+            List<AgentStep.ToolExecutionRecord> executions = new ArrayList<>();
+            List<AgentStep.ToolCallRecord> callRecords = new ArrayList<>();
+
+            for (Message.ToolCall tc : resp.toolCalls()) {
+                callRecords.add(new AgentStep.ToolCallRecord(
+                    tc.id(), tc.function().name(), tc.function().arguments()));
+
+                AgentStep.ToolExecutionRecord exec = executeOneTool(tc);
+                executions.add(exec);
+                log.info("  → {} (id={}, ok={}, {}ms): {}",
+                    tc.function().name(), tc.id(), exec.ok(), exec.durationMs(),
+                    truncate(exec.result(), 60));
+            }
+
+            // 4. 观察:把 assistant 调用 + 每个工具结果都加进 messages
+            messages.add(Message.assistantWithToolCalls(resp.content(), resp.toolCalls()));
+            for (AgentStep.ToolExecutionRecord exec : executions) {
+                messages.add(Message.toolResult(exec.toolCallId(), exec.result()));
+            }
+
+            // 5. 记录这一步
+            writeTrace(step, userGoal, resp, callRecords, executions,
+                tokensIn, tokensOut, totalTokensIn, totalTokensOut, totalCostUsd,
+                null, null);
+
+            // 6. 检查成本护栏
+            if (totalCostUsd > maxCostUsd) {
+                stopReason = StopReason.COST_LIMIT;
+                log.warn("成本超限: ${} > ${}", totalCostUsd, maxCostUsd);
+                break;
+            }
         }
 
-        // Day 1 简化:只执行第一个 tool call,然后第二次 LLM 调用得最终回答
-        // Day 1 simplify: execute the first tool call, then second LLM call for final answer
-        var tc = resp.toolCalls().get(0);
-        log.info("→ 工具调用: {} (id={})", tc.function().name(), tc.id());
+        // 走到这说明没 break 出来 → MAX_STEPS
+        if (stopReason == null) {
+            stopReason = StopReason.MAX_STEPS;
+            log.warn("达到最大步数: {}", maxSteps);
+        }
+        if (finalAnswer == null) {
+            finalAnswer = String.format(
+                "[Agent stopped by %s after %d steps. cost=$%.6f]",
+                stopReason, step, totalCostUsd);
+        }
+
+        RunResult result = new RunResult(finalAnswer, stopReason, step,
+            totalTokensIn, totalTokensOut, totalCostUsd);
+        log.info("=== Done: {} ===", result.summary());
+        return result;
+    }
+
+    // ===== 内部方法 / Internals =====
+
+    /** 执行一个工具调用 / Execute one tool call */
+    private AgentStep.ToolExecutionRecord executeOneTool(Message.ToolCall tc) {
+        long start = System.nanoTime();
+
+        // 解析参数(失败也不让循环挂掉)/ parse args (don't let parse failure kill the loop)
+        Map<String, Object> args;
+        try {
+            args = parseArgs(tc.function().arguments());
+        } catch (Exception e) {
+            long dur = (System.nanoTime() - start) / 1_000_000;
+            log.warn("工具参数 JSON 解析失败: {}: {}", tc.function().arguments(), e.getMessage());
+            return new AgentStep.ToolExecutionRecord(
+                tc.id(), tc.function().name(), Map.of(),
+                "[error: invalid args JSON: " + e.getMessage() + "]",
+                false, dur, "parse error");
+        }
 
         Tool tool = tools.get(tc.function().name());
+
         if (tool == null) {
-            return "[错误] 模型调了未注册的工具: " + tc.function().name();
+            long dur = (System.nanoTime() - start) / 1_000_000;
+            return new AgentStep.ToolExecutionRecord(
+                tc.id(), tc.function().name(), args,
+                "[error: unknown tool: " + tc.function().name() + "]",
+                false, dur, "unknown tool");
         }
 
-        Map<String, Object> args = parseArgs(tc.function().arguments());
-        String observation;
         try {
-            observation = tool.execute(args);
+            String result = tool.execute(args);
+            long dur = (System.nanoTime() - start) / 1_000_000;
+            return new AgentStep.ToolExecutionRecord(
+                tc.id(), tc.function().name(), args, result, true, dur, null);
         } catch (Exception e) {
-            observation = "[工具执行失败: " + e.getMessage() + "]";
-            log.warn("工具执行失败: {}", e.getMessage());
+            long dur = (System.nanoTime() - start) / 1_000_000;
+            log.warn("工具执行失败: {}: {}", tc.function().name(), e.getMessage());
+            return new AgentStep.ToolExecutionRecord(
+                tc.id(), tc.function().name(), args,
+                "[error: " + e.getMessage() + "]",
+                false, dur, e.getMessage());
         }
-        log.info("← 工具结果: {}", truncate(observation, 100));
+    }
 
-        // 把工具调用 + 结果追加到消息,再调一次 LLM
-        // Append the tool call + result to messages, call LLM again
-        messages.add(Message.assistantWithToolCalls(resp.content(), resp.toolCalls()));
-        messages.add(Message.toolResult(tc.id(), observation));
+    /** 估算单步成本(美元)/ Estimate step cost in USD */
+    private double estimateCost(int tokensIn, int tokensOut) {
+        // 默认按 gpt-4o-mini:$0.15/1M input,$0.60/1M output
+        // Override with LLM_COST_INPUT_PER_1M / LLM_COST_OUTPUT_PER_1M
+        double inputPer1M  = 0.15;
+        double outputPer1M = 0.60;
+        String in  = System.getenv("LLM_COST_INPUT_PER_1M");
+        String out = System.getenv("LLM_COST_OUTPUT_PER_1M");
+        if (in  != null && !in.isBlank())  inputPer1M  = Double.parseDouble(in);
+        if (out != null && !out.isBlank()) outputPer1M = Double.parseDouble(out);
+        return tokensIn  * inputPer1M  / 1_000_000.0
+             + tokensOut * outputPer1M / 1_000_000.0;
+    }
 
-        var finalResp = llm.chat(messages, toolSchemas());
-        log.info("最终回复 tokens_in={}, tokens_out={}", finalResp.tokensIn(), finalResp.tokensOut());
-        return finalResp.content();
+    /** 写 trace(trace 为 null 时跳过)/ Write trace (skip if null) */
+    private void writeTrace(int step, String goal, LlmClient.LlmResponse resp,
+                            List<AgentStep.ToolCallRecord> calls,
+                            List<AgentStep.ToolExecutionRecord> execs,
+                            int tIn, int tOut, int tInTotal, int tOutTotal,
+                            double cost, StopReason sr, String answer) {
+        if (trace == null) return;
+        try {
+            trace.writeStep(new AgentStep(
+                step, System.currentTimeMillis(), goal,
+                resp.content(),
+                calls != null ? calls : List.of(),
+                execs != null ? execs : List.of(),
+                tIn, tOut, tInTotal, tOutTotal, cost,
+                sr, answer
+            ));
+        } catch (Exception e) {
+            log.warn("写 trace 失败: {}", e.getMessage());
+        }
     }
 
     private String systemPrompt() {
@@ -101,7 +242,7 @@ public class Agent {
             """.formatted(toolList);
     }
 
-    /** 把 Tool 列表转成 OpenAI tools[] 格式 / convert Tool list to OpenAI tools[] format */
+    /** 把 Tool 列表转成 OpenAI tools[] 格式 */
     private List<Map<String, Object>> toolSchemas() {
         List<Map<String, Object>> schemas = new ArrayList<>();
         for (Tool tool : tools.values()) {
@@ -118,7 +259,6 @@ public class Agent {
     private Map<String, Object> parseArgs(String json) throws Exception {
         if (json == null || json.isBlank()) return Map.of();
         return LlmClient.JSON.readValue(json, new TypeReference<Map<String, Object>>() {});
-        // 这里依赖 LlmClient 的 JSON,但 import static 不行因为是 private
     }
 
     private String truncate(String s, int max) {
