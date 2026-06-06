@@ -12,7 +12,7 @@ target/
 out/
 
 # IDE — VSCode / VSCode
-.vscode/launch.json.bak
+.vscode
 
 # IDE — Eclipse / Eclipse
 .project
