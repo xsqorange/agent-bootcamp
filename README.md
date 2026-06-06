@@ -9,9 +9,9 @@
 
 ## 简介 / Overview
 
-**中文**:这是 `agent-dev-crash-course` 技能的 Day 1 起步项目。**目标:两周内(每天 6 小时)从零搭一个能用的 CLI 编程 Agent,然后扩展到多 Agent、生产部署**。
+**中文**:**目标:两周内(每天 6 小时)从零搭一个能用的 CLI 编程 Agent,然后扩展到多 Agent、生产部署**。
 
-**English**: This is the Day 1 starter project for the `agent-dev-crash-course` skill. **Goal: in 2 weeks (6 hr/day), build a working CLI coding agent from scratch, then extend to multi-agent and production deployment.**
+**English**: **Goal: in 2 weeks (6 hr/day), build a working CLI coding agent from scratch, then extend to multi-agent and production deployment.**
 
 ## 14 天路线图 / 14-Day Roadmap
 
@@ -31,7 +31,6 @@
 | 13 | 部署 / Deploy | Docker + K8s + 健康检查 / health check |
 | 14 | 收尾发布 / Polish & ship | 双语博客 + demo + Release / bilingual blog + demo + release |
 
-完整计划:见 [`agent-dev-crash-course`](https://github.com/nousresearch/hermes-agent) 技能。
 
 ## 快速开始 / Quick Start
 
@@ -220,10 +219,7 @@ export LLM_MODEL="deepseek-chat"
 ## 学习路径 / Learning Path
 
 1. **本仓库**:`agent-bootcamp` — 14 天代码
-2. **配套技能**(在 Hermes Agent 里):
-   - `agent-dev-crash-course` — 2 周速成版(中英双语)
-   - `agent-dev-learning` — 10 周完整版(中英双语)
-3. **跟着做**:
+2. **跟着做**:
    - Day 1-2:读完本仓库的 `LlmClient.java` + `Agent.java` + 3 个 Tool
    - Day 3-5:加 `WriteFile.java` / `Grep.java`,加 JSONL trace
    - Day 6-7:写 README、加 5 个黄金评测用例、推 GitHub
@@ -246,7 +242,7 @@ export LLM_MODEL="deepseek-chat"
 
 ## 贡献 / Contributing
 
-这是个人学习项目,但欢迎:
+这是提供给有一定Java基础想面向Agent开发学习的项目,但欢迎:
 - Issue 提问 / questions
 - PR 修 typo / typo fixes
 - Star ⭐ 鼓励 / for encouragement
@@ -259,12 +255,9 @@ export LLM_MODEL="deepseek-chat"
 
 **码力全开** — Java/Spring 工程师转 Agent 开发
 - GitHub: [@xsqorange](https://github.com/xsqorange)
-- Email: `xsqorange@gmail.com`
-- 学习路径: [`agent-dev-crash-course`](../agent-dev-crash-course) 2 周速成版
+- Email: `maliquankai123@gmail.com`
 
 ## 致谢 / Acknowledgments
 
-- [`agent-dev-crash-course`](https://github.com/nousresearch/hermes-agent) — 2 周速成路径
-- [`agent-dev-learning`](https://github.com/nousresearch/hermes-agent) — 10 周完整路径
 - Hermes Agent — 编排这一切的 AI 助手
-- Anthropic / OpenAI / DeepSeek / Qwen — LLM 提供方
+- Anthropic / OpenAI / DeepSeek / Qwen / MiniMax — LLM 提供方
