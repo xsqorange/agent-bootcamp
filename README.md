@@ -19,7 +19,7 @@
 |---|---|---|---|
 | 1 | LLM 101 + 工具调用 / LLM 101 + Tool calling | `LlmClient` + 3 tools + 单次调用 / single call | ✅ |
 | 2 | ReAct 循环 / ReAct loop | `while` 循环 + StopReason + JSONL trace | ✅ |
-| 3 | + 2 工具 + 评测 / + 2 tools + evals | 5 工具 + 10 个黄金用例 / 5 tools + 10 golden cases | ⏳ |
+| 3 | + 2 工具 + 评测 / + 2 tools + evals | 5 工具 + 10 个黄金用例 / 5 tools + 10 golden cases | ✅ |
 | 4 | 记忆 + 简易 RAG / Memory + simple RAG | 滑动窗口 + pgvector |
 | 5 | 评测脚手架 / Eval harness | 10 个黄金用例 / 10 golden cases |
 | 6-7 | Project 1 收尾 / Project 1 wrap-up | README + demo GIF + GitHub push |
@@ -195,6 +195,89 @@ export LLM_MODEL="deepseek-chat"
 
 **跑通任意 3 个 = Day 2 验收通过** ✓
 
+## Day 3 架构 / Day 3 Architecture (+ 2 工具 + 评测)
+
+**Day 2 → Day 3 的本质变化**:`Agent` 从"能调 3 个工具 + 手测 5 个 TC"升级到"能调 5 个工具 + 自动跑 10 个 TC"。
+
+**关键变化 / Key changes**:
+- ✏️ **新增 `write_file`**:Agent 从"只读"升级到"能改"
+- 🔍 **新增 `grep`**:用 Java 正则跨平台搜文件(不依赖系统 grep)
+- 🐛 **修了 2 个 Day 2 bug**:
+  - trace 最后一行 `stopReason` 缺失(MAX_STEPS / COST_LIMIT 时不写)
+  - `LlmConfig` 不认 `MINIMAX_API_KEY` 命名
+- 🧪 **10 个黄金用例**(5 单元 × 2 工具 + 5 端到端)
+- 🔧 **新工具 + 新测试共 ~700 行代码**
+
+### 5 个工具一览 / 5 Tools Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Agent (5 tools registered)                                 │
+│                                                              │
+│  1. get_current_time  Day 1  返当前时间(带时区)/ current time│
+│  2. read_file         Day 1  读文件(限 100KB)  / read 100KB  │
+│  3. write_file        Day 3  写文件(覆盖,限 1MB)/ write 1MB  │
+│  4. grep              Day 3  Java 正则搜文件   / regex search│
+│  5. exec              Day 1  shell(5s 超时)    / shell exec  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Day 3 新增文件 / Day 3 New Files
+
+| 文件 / File | 作用 / Purpose |
+|---|---|
+| `tools/WriteFile.java` | 写文件工具(覆盖,1MB 限制,父目录自动创建) |
+| `tools/Grep.java` | Java 正则搜文件工具(支持目录递归 5 层,限 1MB/文件) |
+| `src/test/java/.../tools/WriteFileTest.java` | WriteFile 单元测试 (5 cases) |
+| `src/test/java/.../tools/GrepTest.java` | Grep 单元测试 (5 cases) |
+| `src/test/java/.../AgentTest.java` | 5 个端到端真 LLM 测试 (TC-6 ~ TC-10) |
+
+### Day 3 修改文件 / Day 3 Modified Files
+
+| 文件 / File | 改了什么 / What changed |
+|---|---|
+| `Agent.java` | 加 `writeSummaryTrace()` helper;COST_LIMIT / MAX_STEPS 时补写 stopReason(修 TC-5 bug) |
+| `LlmConfig.java` | 加 `MINIMAX_API_KEY` 支持;识别 `sk-cp-` 前缀自动用 `https://api.minimaxi.com/v1` + `minimax-m3` |
+| `Main.java` | 注册 WriteFile + Grep;version 升到 0.3.0 |
+
+### 5 个新增黄金用例 (TC-6 ~ TC-10)
+
+| TC | 目标 / Goal | 预期 / Expected | 验什么 / What it tests |
+|---|---|---|---|
+| **TC-6** | `用 write_file 创建 target/test-tc6.txt,内容 'tc6-payload'` | 1 step,文件创建,内容 = 'tc6-payload' | **write_file 新建** |
+| **TC-7** | `用 write_file 覆盖 target/test-tc7.txt,内容 'NEW CONTENT - tc7'` | 1 step,内容 = 'NEW CONTENT - tc7' | **write_file 覆盖** |
+| **TC-8** | `用 grep 搜 README.md 找 'Day 1'` | 1-2 steps,答案含 'Day 1' 和行号 | **grep 找到匹配** |
+| **TC-9** | `用 grep 搜 README.md 找不存在的 'xyzzy_...'` | 1-2 steps,答案说没找到 | **grep 找不到** |
+| **TC-10** | `读 README.md 第一行,写到 target/test-tc10.txt` | 2-3 steps,文件以 `#` 开头 | **多工具组合** (read + write) |
+
+**跑法 / How to run**:
+```bash
+# 跑全套 15 个测试(10 单元 + 5 端到端,需 ~45 秒,烧 ~$0.003)
+set -a && source .env && set +a
+./mvnw test
+
+# 跑某一个测试
+./mvnw test -Dtest=AgentTest#test6_WriteFileCreatesNewFile
+
+# 不跑端到端(只跑单元测试,~0.1 秒,不烧钱)
+./mvnw test -Dtest='WriteFileTest,GrepTest'
+```
+
+### Day 3 修的 2 个 bug
+
+#### Bug A: trace 缺最后一笔 stopReason
+- **症状**:Day 2 TC-5 的 trace 末尾 `stopReason: null`(应该 `MAX_STEPS`)
+- **根因**:`Agent.run()` 在 `break` 之前没写最后一行带 stopReason 的 trace
+- **修法**:
+  - `COST_LIMIT` 分支:break 前用 `writeTrace` 补写一次(带 stopReason)
+  - `MAX_STEPS` 分支:while 循环结束后调新的 `writeSummaryTrace()` 写一行"印章"行
+- **验证**:跑 `--max-steps 1 --goal '...'` 后 `tail target/trace.jsonl` 现在能看到 `step=2, stopReason="MAX_STEPS"` 的 summary 行
+
+#### Bug B: LlmConfig 不认 `MINIMAX_API_KEY`
+- **症状**:用户贴的 MiniMax key 只能塞到 `OPENAI_API_KEY` slot 才认
+- **修法**:`LlmConfig.fromEnv()` 优先级列表加 `MINIMAX_API_KEY`;`defaultBaseUrl` / `defaultModel` 检测 `sk-cp-` 前缀时自动选 MiniMax 端点
+- **副作用**:日志多了 `keyPrefix=sk-cp-Km...` 输出,便于调试
+
 ## 配置 LLM Provider / Configuring LLM Providers
 
 默认走 **OpenAI**。要切到别的厂商,改环境变量即可:
@@ -206,6 +289,7 @@ Default is **OpenAI**. To switch, just set environment variables:
 | **Anthropic** | `https://api.anthropic.com/v1`(需适配) | `claude-sonnet-4-20250514` | `ANTHROPIC_API_KEY` |
 | **DeepSeek** | `https://api.deepseek.com/v1` | `deepseek-chat` | `DEEPSEEK_API_KEY` |
 | **通义 Qwen** | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-max` | `DASHSCOPE_API_KEY` |
+| **MiniMax (Day 3)** | `https://api.minimaxi.com/v1` | `minimax-m3` | `MINIMAX_API_KEY` (前缀 `sk-cp-`) |
 | **Ollama(本地)/ local** | `http://localhost:11434/v1` | `qwen2.5` | (无需 / not needed) |
 
 ```bash
@@ -225,13 +309,21 @@ export LLM_MODEL="deepseek-chat"
    - Day 6-7:写 README、加 5 个黄金评测用例、推 GitHub
    - Day 8+:看 `agent-dev-crash-course` Day 8-14 计划
 
-## 常见坑(Day 1 必看)/ Pitfalls (Day 1 must-read)
+## 常见坑 / Pitfalls
 
+### Day 1-2 必看
 1. **Java 17 没在 PATH** — 装 JDK 后加到 PATH,或用 IDE 内置
-2. **API key 没设** — `export OPENAI_API_KEY=...`,或写 `.env` 加载
+2. **API key 没设** — `export OPENAI_API_KEY=***` 或用 `.env` 加载
 3. **网络问题** — 国内用 DeepSeek/通义比 OpenAI 快
 4. **Maven 下载慢** — 配 `~/.m2/settings.xml` 用阿里云镜像
 5. **忘了 `mvn compile`** — 跑之前先编译
+
+### Day 3 必看
+6. **相对路径解析错** — `Paths.get("foo.txt").toAbsolutePath()` 解析到 **JVM 的 `user.dir`**,不是 tool 构造时传的 `workDir`!正确做法:`workDir.resolve(relativePath)`,绝对路径才直接用 `Paths.get()`。**这个 bug 在用 `@TempDir` 单测时才暴露**,生产碰巧 work 是因为 Main 默认 workDir = cwd。
+7. **MAX_STEPS / COST_LIMIT 时 trace 缺 stopReason** — `break` 之前要再写一次 `writeTrace()`,或循环结束后写一行 summary。修法见 Day 3 章节 "Bug A"。
+8. **`LlmConfig` 不认你的 API key 命名** — 默认认 `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` / `DASHSCOPE_API_KEY` / `ANTHROPIC_API_KEY`,其他名字要么自己加要么塞到 `OPENAI_API_KEY` slot。Day 3 加了 `MINIMAX_API_KEY`。
+9. **LLM 返回了 Chain of Thought (`<think>...`)** — 一些模型(MiniMax m3)会把思考过程塞在 content 里,**导致 token 消耗翻倍**!要算成本时记得减掉。
+10. **并行工具调用的"假象"** — `multi_tool_use.parallel` 不是模型**故意**并行,是 OpenAI 协议允许 1 个 assistant message 带 N 个 tool_calls,我们用 for 循环依次执行。要"真并行"得用 `ExecutorService` 调 N 个工具(Day 8+ 再优化)。
 
 ## 进度记录 / Progress Log
 
@@ -239,6 +331,7 @@ export LLM_MODEL="deepseek-chat"
 |---|---|---|---|
 | 1 | 2026-06-05 | ✅ 项目骨架 + LlmClient + 3 tools | 推到 GitHub: `xsqorange/agent-bootcamp` |
 | 2 | 2026-06-06 | ✅ ReAct 循环 + StopReason + JSONL trace | 5 个黄金测试用例待跑通 |
+| 3 | 2026-06-07 | ✅ + 2 工具 (write_file, grep) + 10 黄金用例 + 修 2 个 Day 2 bug | 15 个测试 (10 单元 + 5 端到端) 全过 |
 
 ## 贡献 / Contributing
 

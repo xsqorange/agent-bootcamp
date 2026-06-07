@@ -130,6 +130,10 @@ public class Agent {
             if (totalCostUsd > maxCostUsd) {
                 stopReason = StopReason.COST_LIMIT;
                 log.warn("成本超限: ${} > ${}", totalCostUsd, maxCostUsd);
+                // 补写最后一步的 trace,带 stopReason(Day 3 修 TC-5 缺最后一笔的 bug)
+                writeTrace(step, userGoal, resp, callRecords, executions,
+                    tokensIn, tokensOut, totalTokensIn, totalTokensOut, totalCostUsd,
+                    stopReason, null);
                 break;
             }
         }
@@ -138,6 +142,8 @@ public class Agent {
         if (stopReason == null) {
             stopReason = StopReason.MAX_STEPS;
             log.warn("达到最大步数: {}", maxSteps);
+            // 补写一行 summary trace,带 stopReason(Day 3 修 TC-5 缺最后一笔的 bug)
+            writeSummaryTrace(step + 1, userGoal, totalTokensIn, totalTokensOut, totalCostUsd, stopReason);
         }
         if (finalAnswer == null) {
             finalAnswer = String.format(
@@ -227,6 +233,32 @@ public class Agent {
             ));
         } catch (Exception e) {
             log.warn("写 trace 失败: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 写一行"run 总结"trace(用于 MAX_STEPS / COST_LIMIT 终止时)
+     * Write a run-summary trace line (used when run ends due to MAX_STEPS / COST_LIMIT).
+     *
+     * 这行的语义:不是"一步",而是"印章"——告诉 trace 消费者"这次 run 是因为 X 终止的"
+     * Semantics: not a "step", but a "seal" — tells the consumer "this run ended due to X".
+     */
+    private void writeSummaryTrace(int summaryStep, String goal,
+                                   int tInTotal, int tOutTotal,
+                                   double costTotal, StopReason sr) {
+        if (trace == null) return;
+        try {
+            trace.writeStep(new AgentStep(
+                summaryStep, System.currentTimeMillis(), goal,
+                "[reached " + sr + "]",   // llmContent 占位,表示"这是总结行"
+                List.of(),                 // 无 tool calls
+                List.of(),                 // 无 executions
+                0, 0,                      // 本步无 token
+                tInTotal, tOutTotal, costTotal,
+                sr, null                   // finalAnswer 留给 RunResult
+            ));
+        } catch (Exception e) {
+            log.warn("写 summary trace 失败: {}", e.getMessage());
         }
     }
 
