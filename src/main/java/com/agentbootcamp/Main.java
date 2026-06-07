@@ -2,7 +2,9 @@ package com.agentbootcamp;
 
 import com.agentbootcamp.tools.Exec;
 import com.agentbootcamp.tools.GetCurrentTime;
+import com.agentbootcamp.tools.Grep;
 import com.agentbootcamp.tools.ReadFile;
+import com.agentbootcamp.tools.WriteFile;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
@@ -27,8 +29,9 @@ import java.util.List;
 @Command(
     name = "myagent",
     mixinStandardHelpOptions = true,
-    version = "agent-bootcamp 0.2.0",
-    description = "Day 2: ReAct 循环 + StopReason + JSONL trace / ReAct loop with stop reasons and trace."
+    version = "agent-bootcamp 0.3.0",
+    description = "Day 3: 5 tools (write_file, grep added) + ReAct loop + StopReason + JSONL trace. " +
+                  "5 tools (write_file, grep added) + ReAct loop + stop reasons + JSONL trace."
 )
 public class Main implements Runnable {
 
@@ -70,7 +73,10 @@ public class Main implements Runnable {
 
             if (dryRun) {
                 log("DRY RUN — 不调 LLM,只展示工具列表");
-                List<Tool> tools = List.of(new GetCurrentTime(), new ReadFile(), new Exec());
+                List<Tool> tools = List.of(
+                    new GetCurrentTime(), new ReadFile(), new WriteFile(),
+                    new Grep(), new Exec()
+                );
                 log("已注册 " + tools.size() + " 个工具: " + tools.stream().map(Tool::name).toList());
                 log("Agent 配置: maxSteps=" + maxSteps + ", maxCost=$" + maxCost + ", trace=" + tracePath);
                 log("(用 --max-steps, --max-cost, --trace 调参;用 --goal 跑真的)");
@@ -83,10 +89,12 @@ public class Main implements Runnable {
             // 2. LLM 客户端 / build LLM client
             LlmClient llm = new LlmClient(config);
 
-            // 3. 工具 / register tools
+            // 3. 工具 / register tools (Day 3: 5 tools total)
             List<Tool> tools = List.of(
                 new GetCurrentTime(),
                 new ReadFile(),
+                new WriteFile(),  // Day 3 新增
+                new Grep(),       // Day 3 新增
                 new Exec()
             );
             log("已注册 " + tools.size() + " 个工具: " +
