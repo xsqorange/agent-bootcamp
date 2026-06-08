@@ -20,8 +20,8 @@
 | 1 | LLM 101 + 工具调用 / LLM 101 + Tool calling | `LlmClient` + 3 tools + 单次调用 / single call | ✅ |
 | 2 | ReAct 循环 / ReAct loop | `while` 循环 + StopReason + JSONL trace | ✅ |
 | 3 | + 2 工具 + 评测 / + 2 tools + evals | 5 工具 + 10 个黄金用例 / 5 tools + 10 golden cases | ✅ |
-| 4 | 记忆 + 简易 RAG / Memory + simple RAG | 滑动窗口 + pgvector |
-| 5 | 评测脚手架 / Eval harness | 10 个黄金用例 / 10 golden cases |
+| **4** | **记忆 + 简易 RAG / Memory + simple RAG** | **滑动窗口 + 内存索引 + `search_kb` 工具** | **✅** |
+| 5 | 评测脚手架 / Eval harness | 10 个黄金用例 / 10 golden cases | ⏳ |
 | 6-7 | Project 1 收尾 / Project 1 wrap-up | README + demo GIF + GitHub push |
 | 8 | 多 Agent 入门 / Multi-agent intro | Orchestrator + 1 worker |
 | 9 | MCP 服务器 / MCP server | 跨语言工具互通 / cross-language tool interop |
@@ -278,6 +278,76 @@ set -a && source .env && set +a
 - **修法**:`LlmConfig.fromEnv()` 优先级列表加 `MINIMAX_API_KEY`;`defaultBaseUrl` / `defaultModel` 检测 `sk-cp-` 前缀时自动选 MiniMax 端点
 - **副作用**:日志多了 `keyPrefix=sk-cp-Km...` 输出,便于调试
 
+## Day 4 架构 / Day 4 Architecture (+ 记忆 + RAG)
+
+**Day 3 → Day 4 的本质变化**:`Agent` 从"**5 个工具 + 10 个 TC**"升级到"**6 个工具 + 42 个测试 + 记忆压缩 + 简易 RAG**"。
+
+**关键变化 / Key changes**:
+- 🧠 **新增 `MemoryManager`**:滑动窗口 + 摘要压缩,防止长对话把 context 撑爆
+  - 阈值(Q2=C 宽松):`messages.size() > 24` OR `totalTokensIn > 10000`
+  - 策略:保留 `[0] system prompt + [1] first user + 最近 8 条`,中间发 LLM 总结,替换成 1 条 system 消息
+  - 容错:LLM 抛异常/空响应 → fallback 直接丢弃中间消息
+  - 永不压缩 system prompt / 第一条 user(否则 LLM 不知道有这些工具 / 丢失用户最初目标)
+- 📚 **新增 `RagIndex`**:简易 RAG 索引(纯内存,keyword TF 评分)
+  - 启动时扫 `src/main/resources/knowledge/` 下的所有 .md
+  - chunk(Q3=A):按段切(双换行) ≤ 500 字符,> 500 用滑窗(overlap 50)
+  - search:keyword overlap 评分,中英文都支持
+- 🔍 **新增 `search_kb`**:第 6 个工具
+  - 参数:`query`(必填) + `max_results`(1-10,默认 3)
+  - 返回:`--- chunk #N in file ---` 格式
+- 🧪 **27 个新测试**(7 MemoryManager + 11 RagIndex + 6 SearchKb + 3 E2E TC-11/12/13)
+- 📁 **5 个知识库 .md** 文件(overview / tools / progress / java-tips / git-workflow)
+
+### 6 个工具一览 / 6 Tools Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Agent (6 tools registered)                                 │
+│                                                              │
+│  1. get_current_time  Day 1  返当前时间(带时区) / current time│
+│  2. read_file         Day 1  读文件(限 100KB)  / read 100KB   │
+│  3. write_file        Day 3  写文件(覆盖,1MB) / write 1MB     │
+│  4. grep              Day 3  Java 正则搜文件  / regex search  │
+│  5. exec              Day 1  shell(5s 超时)    / shell exec   │
+│  6. search_kb         Day 4  内存 RAG 搜知识库 / in-memory RAG │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Day 4 新增文件 / Day 4 New Files
+
+| 文件 / File | 作用 / Purpose |
+|---|---|
+| `MemoryManager.java` | 滑动窗口 + LLM 摘要压缩(`shouldCompress` / `compress` / fallback) |
+| `RagIndex.java` | 简易 RAG 索引(段切 chunk + keyword TF 评分 + `search`) |
+| `tools/SearchKb.java` | 第 6 个工具(包装 `RagIndex.search`,输出 `--- chunk ---` 格式) |
+| `src/main/resources/knowledge/*.md` | 5 个知识库文件(overview / tools / progress / java-tips / git-workflow) |
+| `src/test/java/.../MemoryManagerTest.java` | MemoryManager 单元测试 (7 cases) |
+| `src/test/java/.../RagIndexTest.java` | RagIndex 单元测试 (11 cases) |
+| `src/test/java/.../tools/SearchKbTest.java` | SearchKb 单元测试 (6 cases) |
+
+### Day 4 修改文件 / Day 4 Modified Files
+
+| 文件 / File | 改了什么 / What changed |
+|---|---|
+| `Agent.java` | 加 6 参构造器(5 参 delegate 保持向后兼容);`run()` 每步前调 `memory.compressIfNeeded()` |
+| `Main.java` | 加载 `RagIndex`(classpath → 文件系统兜底);注册 `SearchKb`;加 `--no-memory` flag;version 升到 0.4.0 |
+
+### 3 个新增黄金用例 (TC-11 ~ TC-13)
+
+| TC | 目标 / Goal | 预期 / Expected | 验什么 / What it tests |
+|---|---|---|---|
+| **TC-11** | 启用 `MemoryManager` 跑简单任务 | `FINAL_ANSWER`,跑通不挂 | **memory 启用不破坏正常流程** |
+| **TC-12** | `用 search_kb 找 Day 3 加的工具` | 答案含 `write_file` + `grep` | **RAG 找到正确知识** |
+| **TC-13** | `search_kb 查 "Day 3 write_file grep" + 写 target/test-tc13.txt` | 文件存在,内容提到 write_file / day 3 | **RAG + write_file 多工具组合** |
+
+**跑法 / How to run**:
+```bash
+set -a && source .env && set +a
+./mvnw test                                # 跑全部 42 个测试(~71s,烧 ~$0.005)
+./mvnw test -Dtest='MemoryManagerTest,RagIndexTest,SearchKbTest'  # 只跑 Day 4 单元(0.1s,不烧钱)
+./mvnw test -Dtest=AgentTest#test12_SearchKbFindsDay3Tools       # 单个 E2E
+```
+
 ## 配置 LLM Provider / Configuring LLM Providers
 
 默认走 **OpenAI**。要切到别的厂商,改环境变量即可:
@@ -325,6 +395,14 @@ export LLM_MODEL="deepseek-chat"
 9. **LLM 返回了 Chain of Thought (`<think>...`)** — 一些模型(MiniMax m3)会把思考过程塞在 content 里,**导致 token 消耗翻倍**!要算成本时记得减掉。
 10. **并行工具调用的"假象"** — `multi_tool_use.parallel` 不是模型**故意**并行,是 OpenAI 协议允许 1 个 assistant message 带 N 个 tool_calls,我们用 for 循环依次执行。要"真并行"得用 `ExecutorService` 调 N 个工具(Day 8+ 再优化)。
 
+### Day 4 必看
+11. **滑动窗口的"丢中间" vs "总结中间"** — Day 4 选总结中间(更保真),但**总结本身有 token 成本**(又要调 LLM)。高吞吐场景下考虑用规则截断(`truncate(messages, keepLastN=8)` 拿掉老内容)省 token。
+12. **MemoryManager 永远保留 system + first user** — 这两个是"骨架",system 是工具 schema + 角色,first user 是用户最初目标。任何压缩策略都不能动它们,否则 LLM 会"失忆"或"不知道自己是谁"。
+13. **RAG 不引 embedding 的代价** — Day 4 用 keyword TF,优点:无外部依赖、零成本、快;缺点:同义词("工具" vs "tool")、多语言、词形变化都搜不到。Day 8+ 上 embedding 升级。
+14. **chunk 切分按段 vs 按字符** — 按段(双换行)优先,语义最干净;但**单段超长会被滑窗切碎**,可能把"概念 A 的描述"和"概念 B 的描述"切到同一个 chunk,搜"概念 A"时会带出概念 B 的内容。
+15. **`@TempDir` 又救了一命** — 跟 Day 3 `Paths.get` bug 一样,生产能跑 ≠ 测试能过。Day 4 的 `RagIndexTest.testNullDir()` / `testSearchEmptyQuery()` / `testCompressFallbackOnLlmError` 这类边界 case,**真 API + 真人手测都难暴露**,只有单元测试能抓。
+16. **`Agent` 5 参构造器保留是给 Day 1-3 测试用** — 加 memory 是破坏性变更,但通过 5 参 delegate 到 6 参(`memory=null`),**Day 1-3 的 15 个测试一行不用改**。这是"加 feature 不 break 现有用户"的教科书姿势。
+
 ## 进度记录 / Progress Log
 
 | Day | 日期 | 完成情况 | 笔记 |
@@ -332,6 +410,7 @@ export LLM_MODEL="deepseek-chat"
 | 1 | 2026-06-05 | ✅ 项目骨架 + LlmClient + 3 tools | 推到 GitHub: `xsqorange/agent-bootcamp` |
 | 2 | 2026-06-06 | ✅ ReAct 循环 + StopReason + JSONL trace | 5 个黄金测试用例待跑通 |
 | 3 | 2026-06-07 | ✅ + 2 工具 (write_file, grep) + 10 黄金用例 + 修 2 个 Day 2 bug | 15 个测试 (10 单元 + 5 端到端) 全过 |
+| **4** | **2026-06-08** | **✅ + MemoryManager + RagIndex + search_kb (6 工具) + 5 知识库 .md** | **42 个测试 (24 单元 + 8 端到端) 全过, 编译 0 warning, 本地 day4 分支 (未 push 未 merge)** |
 
 ## 贡献 / Contributing
 
