@@ -40,16 +40,33 @@ public class Agent {
     private final TraceWriter trace;       // 可为 null
     private final int maxSteps;
     private final double maxCostUsd;
+    private final MemoryManager memory;    // Day 4 新增, 可为 null
 
+    /**
+     * 便捷构造器(5 参) — 不带 memory / Convenience constructor (5-param) — no memory.
+     * 向后兼容 Day 1-3 的测试。
+     */
     public Agent(LlmClient llm, List<Tool> tools, TraceWriter trace,
                  int maxSteps, double maxCostUsd) {
+        this(llm, tools, trace, maxSteps, maxCostUsd, null);
+    }
+
+    /**
+     * 完整构造器(6 参)— Day 4 / Full constructor (6-param) — Day 4.
+     *
+     * @param memory MemoryManager 实例, null = 不压缩
+     */
+    public Agent(LlmClient llm, List<Tool> tools, TraceWriter trace,
+                 int maxSteps, double maxCostUsd, MemoryManager memory) {
         this.llm = llm;
         this.tools = tools.stream().collect(Collectors.toMap(Tool::name, t -> t));
         this.trace = trace;
         this.maxSteps = maxSteps;
         this.maxCostUsd = maxCostUsd;
-        log.info("Agent 初始化: tools={}, maxSteps={}, maxCost=${}",
-            this.tools.keySet(), maxSteps, maxCostUsd);
+        this.memory = memory;
+        log.info("Agent 初始化: tools={}, maxSteps={}, maxCost=${}, memory={}",
+            this.tools.keySet(), maxSteps, maxCostUsd,
+            memory != null ? "enabled" : "disabled");
     }
 
     /**
@@ -75,6 +92,13 @@ public class Agent {
         while (step < maxSteps) {
             step++;
             log.info("=== Step {}/{} ===", step, maxSteps);
+
+            // 0. Day 4: 检查是否需要压缩 messages(防止 context 爆)
+            //    触发条件: messages 数 > 24 OR totalTokensIn > 10000
+            if (memory != null && memory.shouldCompress(messages.size(), totalTokensIn)) {
+                log.info("Memory 压缩触发: messages={}, tokens={}", messages.size(), totalTokensIn);
+                messages = memory.compress(messages, llm);
+            }
 
             // 1. 思考:调 LLM
             LlmClient.LlmResponse resp = llm.chat(messages, toolSchemas());
