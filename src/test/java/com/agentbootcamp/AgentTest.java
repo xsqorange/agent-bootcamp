@@ -4,6 +4,7 @@ import com.agentbootcamp.tools.Exec;
 import com.agentbootcamp.tools.GetCurrentTime;
 import com.agentbootcamp.tools.Grep;
 import com.agentbootcamp.tools.ReadFile;
+import com.agentbootcamp.tools.SearchKb;
 import com.agentbootcamp.tools.WriteFile;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -57,14 +58,42 @@ class AgentTest {
         LlmConfig config = LlmConfig.fromEnv();
         llm = new LlmClient(config);
         workDir = Path.of(".").toAbsolutePath().normalize();
+        // Day 4: 加载知识库 (从 classpath:/knowledge/ 或文件系统兜底)
+        Path knowledgeDir = findKnowledgeDir();
+        RagIndex ragIndex = new RagIndex(knowledgeDir);
+        log("知识库: " + (knowledgeDir != null ? knowledgeDir : "(not found)")
+            + " → " + ragIndex.size() + " chunks");
         tools = List.of(
             new GetCurrentTime(),
             new ReadFile(),
             new WriteFile(workDir),
             new Grep(workDir),
-            new Exec()
+            new Exec(),
+            new SearchKb(ragIndex)  // Day 4 新增
         );
-        log("已注册 5 个工具: get_current_time, read_file, write_file, grep, exec");
+        log("已注册 6 个工具: get_current_time, read_file, write_file, grep, exec, search_kb");
+    }
+
+    /**
+     * 找知识库目录 (跟 Main.java 同款逻辑)/ Find knowledge dir (same as Main.java).
+     * 测试 classpath:/knowledge/ 由 mvn test 时的 target/test-classes 提供。
+     */
+    private static Path findKnowledgeDir() {
+        try {
+            java.net.URL url = AgentTest.class.getResource("/knowledge/");
+            if (url != null && "file".equals(url.getProtocol())) {
+                Path p = Path.of(url.toURI());
+                if (Files.isDirectory(p)) return p;
+            }
+        } catch (Exception e) { /* fall through */ }
+        Path[] candidates = {
+            Path.of("src/main/resources/knowledge"),
+            Path.of("target/classes/knowledge")
+        };
+        for (Path p : candidates) {
+            if (Files.isDirectory(p)) return p;
+        }
+        return null;
     }
 
     // ====================================================================
@@ -185,6 +214,74 @@ class AgentTest {
         // README 第一行以 "#" 开头
         assertTrue(content.startsWith("#"),
             "TC-10: 文件应包含 README 第一行(以 # 开头),实际: " + content);
+    }
+
+    // ====================================================================
+    // TC-11: Memory 启用时不挂(Day 4)/ Memory enabled doesn't break
+    // ====================================================================
+    @Test
+    void test11_MemoryEnabledCompletesNormally() throws Exception {
+        Agent agent = new Agent(llm, tools, null, 8, 0.15,
+            new MemoryManager());  // Day 4: 启用 memory
+        RunResult result = agent.run("Use the get_current_time tool to get the current time, then say 'done'.");
+
+        log("TC-11 结果: stopReason=" + result.stopReason() + ", steps=" + result.totalSteps()
+            + ", answer='" + result.finalAnswer() + "'");
+
+        assertEquals(StopReason.FINAL_ANSWER, result.stopReason(),
+            "TC-11: 简单任务应正常完成, 不应被 memory 干扰");
+    }
+
+    // ====================================================================
+    // TC-12: search_kb 查 Day 3 工具(Day 4)/ search_kb finds Day 3 tools info
+    // ====================================================================
+    @Test
+    void test12_SearchKbFindsDay3Tools() throws Exception {
+        Agent agent = new Agent(llm, tools, null, 5, 0.10);
+        RunResult result = agent.run(
+            "Use the search_kb tool to find what tools were added in Day 3. " +
+            "Then reply with the tool names."
+        );
+
+        log("TC-12 结果: stopReason=" + result.stopReason() + ", steps=" + result.totalSteps()
+            + ", answer='" + result.finalAnswer() + "'");
+
+        assertEquals(StopReason.FINAL_ANSWER, result.stopReason());
+        String lower = result.finalAnswer().toLowerCase();
+        assertTrue(lower.contains("write_file") || lower.contains("write file"),
+            "TC-12: 答案应提到 'write_file', 实际: " + result.finalAnswer());
+        assertTrue(lower.contains("grep"),
+            "TC-12: 答案应提到 'grep', 实际: " + result.finalAnswer());
+    }
+
+    // ====================================================================
+    // TC-13: search_kb + write_file 组合(Day 4)/ multi-tool with RAG
+    // ====================================================================
+    @Test
+    void test13_SearchKbThenWriteFile() throws Exception {
+        Path target = workDir.resolve("target/test-tc13.txt");
+        Files.deleteIfExists(target);
+        log("TC-13 目标文件: " + target);
+
+        Agent agent = new Agent(llm, tools, null, 8, 0.15);
+        RunResult result = agent.run(
+            "Step 1: Use search_kb to search for 'Day 3 write_file grep' (max_results=2). " +
+            "Step 2: Use write_file to write a summary of what you found to target/test-tc13.txt. " +
+            "The summary should be at least 1 line. " +
+            "Step 3: Reply 'done'."
+        );
+
+        log("TC-13 结果: stopReason=" + result.stopReason() + ", steps=" + result.totalSteps()
+            + ", answer='" + result.finalAnswer() + "'");
+
+        assertEquals(StopReason.FINAL_ANSWER, result.stopReason());
+        assertTrue(Files.exists(target), "TC-13: 文件必须存在");
+        String content = Files.readString(target).trim();
+        assertFalse(content.isBlank(), "TC-13: 文件不应为空");
+        // 知识库内容应该提到了这些工具
+        String lower = content.toLowerCase();
+        assertTrue(lower.contains("write_file") || lower.contains("write file") || lower.contains("day 3"),
+            "TC-13: 文件应包含知识库内容(提到 write_file 或 day 3), 实际: " + content);
     }
 
     // ====================================================================
