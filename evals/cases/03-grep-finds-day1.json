@@ -1,0 +1,10 @@
+{
+  "id": "03-grep-finds-day1",
+  "prompt": "Use the grep tool (NOT read_file) to search for the pattern 'Day 1' in README.md. Report how many matching lines you found and show the first match's line number. End your reply with 'GREP-DONE'.",
+  "expected": {
+    "must_call_tools": ["grep"],
+    "must_contain_in_final": ["Day 1", "GREP-DONE"],
+    "max_steps": 5,
+    "max_cost_usd": 0.10
+  }
+}

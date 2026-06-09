@@ -1,0 +1,10 @@
+{
+  "id": "04-grep-finds-nothing",
+  "prompt": "Use the grep tool to search for the pattern 'xyzzy_no_such_pattern_xyzzy' in README.md. Report what you found. End your reply with 'GREP-NONE'.",
+  "expected": {
+    "must_call_tools": ["grep"],
+    "must_contain_in_final": ["GREP-NONE"],
+    "max_steps": 5,
+    "max_cost_usd": 0.10
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "id": "08-search-kb-day3",
+  "prompt": "Use the search_kb tool to find what tools were added in Day 3. Then reply with a brief summary and end your reply with 'KB-DONE'.",
+  "expected": {
+    "must_call_tools": ["search_kb"],
+    "must_contain_in_final": ["KB-DONE", "Day 3"],
+    "max_steps": 5,
+    "max_cost_usd": 0.10
+  }
+}

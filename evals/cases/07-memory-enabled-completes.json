@@ -1,0 +1,10 @@
+{
+  "id": "07-memory-enabled-completes",
+  "prompt": "Use the get_current_time tool to get the current time, then say 'MEM-OK'. (MemoryManager is enabled for this case.)",
+  "expected": {
+    "must_call_tools": ["get_current_time"],
+    "must_contain_in_final": ["MEM-OK"],
+    "max_steps": 5,
+    "max_cost_usd": 0.10
+  }
+}

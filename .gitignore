@@ -25,6 +25,9 @@ bin/
 logs/
 trace.jsonl
 
+# Eval harness reports / 评测 trace(永不 commit)
+evals/reports/
+
 # OS / 系统
 .DS_Store
 Thumbs.db
@@ -42,6 +45,7 @@ desktop.ini
 # Test reports / 测试报告
 target/surefire-reports/
 target/jacoco.exec
+dependency-reduced-pom.xml   # Day 5: shade plugin 自动生成的临时 pom
 
 # Editor swap files / 编辑器临时文件
 *.swp
