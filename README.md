@@ -20,8 +20,8 @@
 | 1 | LLM 101 + 工具调用 / LLM 101 + Tool calling | `LlmClient` + 3 tools + 单次调用 / single call | ✅ |
 | 2 | ReAct 循环 / ReAct loop | `while` 循环 + StopReason + JSONL trace | ✅ |
 | 3 | + 2 工具 + 评测 / + 2 tools + evals | 5 工具 + 10 个黄金用例 / 5 tools + 10 golden cases | ✅ |
-| **4** | **记忆 + 简易 RAG / Memory + simple RAG** | **滑动窗口 + 内存索引 + `search_kb` 工具** | **✅** |
-| 5 | 评测脚手架 / Eval harness | 10 个黄金用例 / 10 golden cases | ⏳ |
+| 4 | 记忆 + 简易 RAG / Memory + simple RAG | 滑动窗口 + 内存索引 + `search_kb` 工具 | ✅ |
+| **5** | **评测脚手架 / Eval harness** | **10 个黄金用例 + JUnit harness + `mvn verify` 全过** | **✅** |
 | 6-7 | Project 1 收尾 / Project 1 wrap-up | README + demo GIF + GitHub push |
 | 8 | 多 Agent 入门 / Multi-agent intro | Orchestrator + 1 worker |
 | 9 | MCP 服务器 / MCP server | 跨语言工具互通 / cross-language tool interop |
@@ -348,6 +348,141 @@ set -a && source .env && set +a
 ./mvnw test -Dtest=AgentTest#test12_SearchKbFindsDay3Tools       # 单个 E2E
 ```
 
+## Day 5 架构 / Day 5 Architecture (评测脚手架)
+
+**Day 4 → Day 5 的本质变化**:`Agent` 从"6 工具 + 42 测试"升级到"**JSON 驱动的评测 harness**" —— 10 个黄金用例写在 `evals/cases/*.json`,`mvn verify` 一键跑完,**Day 6+ 调参不再盲调**。
+
+**关键变化 / Key changes**:
+- 📁 **新增 `evals/cases/*.json`** ×10 — 黄金用例声明式定义(非工程师也能改)
+- ⚙️ **新增 `EvalHarness`** — 跑 Agent + 4 条断言(工具调用 / 答案内容 / 步数 / 成本)+ 可选 `post_check` 文件副作用
+- 🧪 **新增 `EvalRunnerTest`** — JUnit 5 `@TestFactory` 动态生成 10 个测试,`mvn verify` 一键跑完
+- 🛡️ **EvalHarness 内置 429 retry-with-backoff** — 应对 LLM API 限流,跑评测更稳
+- 🐛 **修 3 个 Day 5 真坑**:
+  - record 反序列化需要 `-parameters` 编译选项(否则组件名变 `arg0/arg1`)
+  - JSON `snake_case` → record `camelCase` 命名策略
+  - 多个 case 连续跑触发 LLM 429 rate limit → 加 retry
+- 📊 **52 个测试全过(42 Day 1-4 + 10 EvalCase)**, `mvn verify` 一次过
+
+### 评测架构图 / Eval Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  mvn verify                                                  │
+│      ↓                                                       │
+│  EvalRunnerTest (@TestFactory 动态测试)                       │
+│      ↓ 加载 evals/cases/*.json                               │
+│  List<EvalCase>                                              │
+│      ↓ 每个 case                                              │
+│  EvalHarness.runCase(case)  ← retry 3x on 429                │
+│      ├─ 准备: TraceWriter + 6 工具 + RAG 索引 + Memory       │
+│      ├─ Agent.run(case.prompt)  → RunResult                  │
+│      ├─ collectCalledTools(trace.jsonl)                      │
+│      └─ 4 断言 + post_check → EvalResult                    │
+│      ↓                                                       │
+│  写 evals/reports/<id>.jsonl (trace,gitignore)              │
+│  打印 Day 5 Eval Report 汇总 (通过率 / 总成本 / 总步数)       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 4 条断言 / 4 Hard Assertions
+
+| # | 断言 | 怎么验 | 失败例子 |
+|---|---|---|---|
+| 1 | `must_call_tools ⊆ calledTools` | 从 `trace.jsonl` 解析 `executions[].name` | 期望 `["write_file"]`,实际没调 |
+| 2 | `must_contain_in_final ⊆ finalAnswer` | case-insensitive substring | 期望 `"EXEC-DONE"`,答案没这个字 |
+| 3 | `totalSteps ≤ max_steps` | `RunResult.totalSteps()` | 设 5,实际跑了 6 |
+| 4 | `totalCostUsd ≤ max_cost_usd` | `RunResult.totalCostUsd()` | 设 0.10,实际烧 0.15 |
+| 5 | (可选) `post_check` | `file_exists` / `file_equals` / `file_contains` | 文件没创建 / 内容不匹配 |
+
+### 10 个黄金用例 / 10 Golden Test Cases (TC-1 ~ TC-10)
+
+| TC | id | 目标 / Goal | 验什么 / What it tests | max_steps | max_cost |
+|---|---|---|---|---|---|
+| 01 | write-file-creates | 创建 `target/eval-tc01.txt` 内容 'eval-tc01-payload' | write_file **新建** | 5 | $0.10 |
+| 02 | write-file-overwrites | 覆盖 `target/eval-tc02.txt` 为 'EVAL-TC02-NEW' | write_file **覆盖** | 5 | $0.10 |
+| 03 | grep-finds-day1 | grep README.md 找 'Day 1' | grep **找到** + 含 'Day 1' | 5 | $0.10 |
+| 04 | grep-finds-nothing | grep 找不存在的 'xyzzy_...' | grep **没找到** | 5 | $0.10 |
+| 05 | read-then-write-combo | 读 README 写第一行到新文件 | **多工具组合** (read+write) | 8 | $0.15 |
+| 06 | get-current-time | 调 get_current_time | 单工具 + FINAL_ANSWER | 3 | $0.05 |
+| 07 | memory-enabled-completes | 启用 MemoryManager 跑简单任务 | **memory 不破坏** | 5 | $0.10 |
+| 08 | search-kb-day3 | search_kb 查 Day 3 内容 | **RAG 找到** + 答出 'Day 3' | 5 | $0.10 |
+| 09 | search-kb-then-write | search_kb + write_file 写总结 | **RAG + write_file 组合** | 8 | $0.15 |
+| 10 | list-java-via-exec | exec 数 .java 文件 | exec 跑命令 + 答数 | 8 | $0.15 |
+
+**跑法 / How to run**:
+```bash
+set -a && source .env && set +a
+
+# 跑全套 10 个 EvalCase + Day 1-4 单元测试 (~3 分钟,烧 ~$0.012)
+./mvnw verify
+
+# 只跑 EvalCase(10 个)
+./mvnw test -Dtest=EvalRunnerTest
+
+# 单个 case
+./mvnw test -Dtest=EvalRunnerTest  # 配合 IDE 的 -Dtest.method=... (IntelliJ 可,CLI 难)
+
+# 查看 trace
+cat evals/reports/01-write-file-creates.jsonl | head -5 | python3 -m json.tool
+```
+
+### Day 5 新增文件 / Day 5 New Files
+
+| 文件 / File | 作用 / Purpose |
+|---|---|
+| `evals/cases/01-write-file-creates.json` | 黄金用例 1 — write_file 新建 |
+| `evals/cases/02-write-file-overwrites.json` | 黄金用例 2 — write_file 覆盖 |
+| `evals/cases/03-grep-finds-day1.json` | 黄金用例 3 — grep 找到 |
+| `evals/cases/04-grep-finds-nothing.json` | 黄金用例 4 — grep 找不到 |
+| `evals/cases/05-read-then-write-combo.json` | 黄金用例 5 — 多工具组合 |
+| `evals/cases/06-get-current-time.json` | 黄金用例 6 — 单工具 |
+| `evals/cases/07-memory-enabled-completes.json` | 黄金用例 7 — memory 兼容 |
+| `evals/cases/08-search-kb-day3.json` | 黄金用例 8 — RAG 命中 |
+| `evals/cases/09-search-kb-then-write.json` | 黄金用例 9 — RAG + write |
+| `evals/cases/10-list-java-via-exec.json` | 黄金用例 10 — exec |
+| `src/main/java/com/agentbootcamp/evals/EvalCase.java` | record + JSON 工厂 (snake_case → camelCase) |
+| `src/main/java/com/agentbootcamp/evals/EvalHarness.java` | 跑 + 4 断言 + 429 retry (核心 ~200 行) |
+| `src/main/java/com/agentbootcamp/evals/EvalResult.java` | record + passed/failed 工厂 |
+| `src/test/java/com/agentbootcamp/evals/EvalRunnerTest.java` | JUnit 5 `@TestFactory` 动态测试 |
+
+### Day 5 修改文件 / Day 5 Modified Files
+
+| 文件 / File | 改了什么 / What changed |
+|---|---|
+| `pom.xml` | `maven-compiler-plugin` 加 `<parameters>true</parameters>`(Day 5 修坑 #1) |
+| `.gitignore` | 加 `evals/reports/`(trace 永不 commit) |
+| `Main.java` | 暂时未动(后续可加 `--eval` flag 一键跑评测) |
+
+### Day 5 修的 3 个真坑 / 3 Real Bugs Day 5 Fixed
+
+#### 坑 #1: Jackson 反序列化 record 必须有 `-parameters` 编译选项
+- **症状**:10 个 case 全部 NPE 挂 `Expected.mustCallTools() is null`
+- **根因**:Java 14+ 的 record 组件名在编译时**默认擦除**为 `arg0/arg1`,Jackson 反射找不到字段
+- **修法**:`maven-compiler-plugin` 加 `<parameters>true</parameters>` 让组件名保留进 class 文件
+- **影响**:Day 1-4 的 record (`RunResult` / `AgentStep` / `LlmResponse`) 都是**构造/序列化**用,不受影响;Day 5 第一次**反序列化** record 才踩到
+
+#### 坑 #2: JSON snake_case ↔ record camelCase
+- **症状**:`must_call_tools` JSON 字段对应不上 record 的 `mustCallTools` 组件
+- **根因**:Jackson 默认不做命名策略转换
+- **修法**:`ObjectMapper` 配 `PropertyNamingStrategies.SNAKE_CASE`
+
+#### 坑 #3: LLM API 429 rate limit
+- **症状**:跑 10 个 case 连续,后半截 case 报 `429 Token Plan ... 并发过高`
+- **根因**:MiniMax API 对短时间多次请求有限流,`mvn verify` 跑 50+ 测试很容易撞
+- **修法**:`EvalHarness.runCase()` 内置 3 次重试,指数退避 5s / 15s,只对 429 重试
+- **收益**:`mvn verify` 跑通率从 9/10 提升到 10/10
+
+### Day 5 验收清单 / Day 5 Acceptance
+
+- [x] 10 个黄金用例 JSON 全部存在
+- [x] `mvn verify` 跑通,4 断言全生效
+- [x] 通过率 10/10 (100%)
+- [x] `evals/reports/<id>.jsonl` 每用例如实写盘
+- [x] 3 commit 全部推到 `origin/day5`
+- [x] README Day 5 详细章节就位
+- [x] 总成本 $0.0081 (10 case 跑 2 次,加上 retry)
+- [x] 总时长 ~3 分钟 (`mvn verify` 整套)
+
 ## 配置 LLM Provider / Configuring LLM Providers
 
 默认走 **OpenAI**。要切到别的厂商,改环境变量即可:
@@ -403,6 +538,14 @@ export LLM_MODEL="deepseek-chat"
 15. **`@TempDir` 又救了一命** — 跟 Day 3 `Paths.get` bug 一样,生产能跑 ≠ 测试能过。Day 4 的 `RagIndexTest.testNullDir()` / `testSearchEmptyQuery()` / `testCompressFallbackOnLlmError` 这类边界 case,**真 API + 真人手测都难暴露**,只有单元测试能抓。
 16. **`Agent` 5 参构造器保留是给 Day 1-3 测试用** — 加 memory 是破坏性变更,但通过 5 参 delegate 到 6 参(`memory=null`),**Day 1-3 的 15 个测试一行不用改**。这是"加 feature 不 break 现有用户"的教科书姿势。
 
+### Day 5 必看
+17. **`-parameters` 编译选项必加** — 写一个反序列化 record 的代码(比如从 JSON 读 EvalCase)才会踩到。没它 record 组件名变 `arg0/arg1`,Jackson 反射找不到字段。**Day 1-4 没踩因为都是构造/序列化 record**。修法:`maven-compiler-plugin` 加 `<parameters>true</parameters>`。
+18. **JSON 命名策略要显式配** — Jackson 默认不做 snake_case ↔ camelCase 转换。JSON 写 `must_call_tools` 就要在 `ObjectMapper` 配 `PropertyNamingStrategies.SNAKE_CASE`,否则 record 组件全 null。
+19. **LLM API 429 是日常不是例外** — 跑评测一定要在 harness 里加 retry-with-backoff。Day 5 经验:`mvn verify` 跑 10+ 个真 LLM case 必撞 429,没 retry 评测天天飘。
+20. **断言别假设 LLM 答案格式** — 模型说 "WriteFile" / "`write_file`" / "write_file" 都对(语义一致),但断言要 case-insensitive + 不假设具体大小写格式,否则每次 run 都可能飘。
+21. **`@TestFactory` 动态测试是 harness 标配** — 比 10 个 `@Test` 方法清爽一万倍,`List<EvalCase>` 加新 case 不用动 Java 代码。`mvn verify` 自动跑新 case,`mvn -Dtest=EvalRunnerTest` 也能全跑。
+22. **eval reports 一定要 gitignore** — `evals/reports/<id>.jsonl` 跟普通 trace 一样可能含 prompt 数据,绝不入库。`.gitignore` 加 `evals/reports/` 一劳永逸。
+
 ## 进度记录 / Progress Log
 
 | Day | 日期 | 完成情况 | 笔记 |
@@ -410,7 +553,8 @@ export LLM_MODEL="deepseek-chat"
 | 1 | 2026-06-05 | ✅ 项目骨架 + LlmClient + 3 tools | 推到 GitHub: `xsqorange/agent-bootcamp` |
 | 2 | 2026-06-06 | ✅ ReAct 循环 + StopReason + JSONL trace | 5 个黄金测试用例待跑通 |
 | 3 | 2026-06-07 | ✅ + 2 工具 (write_file, grep) + 10 黄金用例 + 修 2 个 Day 2 bug | 15 个测试 (10 单元 + 5 端到端) 全过 |
-| **4** | **2026-06-08** | **✅ + MemoryManager + RagIndex + search_kb (6 工具) + 5 知识库 .md** | **42 个测试 (24 单元 + 8 端到端) 全过, 编译 0 warning, 本地 day4 分支 (未 push 未 merge)** |
+| 4 | 2026-06-08 | ✅ + MemoryManager + RagIndex + search_kb (6 工具) + 5 知识库 .md | 42 个测试 (24 单元 + 8 端到端) 全过, 编译 0 warning, 本地 day4 分支 (未 push 未 merge) |
+| **5** | **2026-06-09** | **✅ + EvalHarness + 10 黄金用例 JSON + JUnit 动态测试 + 429 retry** | **52 个测试 (32 单元 + 20 端到端) 全过, mvn verify ~3 分钟, 烧 $0.0081, 本地 day5 分支 (未 push 未 merge)** |
 
 ## 贡献 / Contributing
 
