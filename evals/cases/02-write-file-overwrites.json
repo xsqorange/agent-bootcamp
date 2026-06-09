@@ -1,0 +1,15 @@
+{
+  "id": "02-write-file-overwrites",
+  "prompt": "Use write_file to overwrite target/eval-tc02.txt with the exact content 'EVAL-TC02-NEW'. Do not read the file first. After writing, reply 'overwritten'.",
+  "expected": {
+    "must_call_tools": ["write_file"],
+    "must_contain_in_final": ["overwritten"],
+    "max_steps": 5,
+    "max_cost_usd": 0.10
+  },
+  "post_check": {
+    "type": "file_equals",
+    "path": "target/eval-tc02.txt",
+    "content": "EVAL-TC02-NEW"
+  }
+}

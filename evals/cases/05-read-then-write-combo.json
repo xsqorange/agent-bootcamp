@@ -1,0 +1,14 @@
+{
+  "id": "05-read-then-write-combo",
+  "prompt": "Step 1: Use read_file to read README.md (the first 2000 characters is enough). Step 2: Use write_file to write the FIRST LINE of README.md to target/eval-tc05.txt. Step 3: Reply 'combo-done'.",
+  "expected": {
+    "must_call_tools": ["read_file", "write_file"],
+    "must_contain_in_final": ["combo-done"],
+    "max_steps": 8,
+    "max_cost_usd": 0.15
+  },
+  "post_check": {
+    "type": "file_exists",
+    "path": "target/eval-tc05.txt"
+  }
+}

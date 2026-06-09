@@ -1,0 +1,15 @@
+{
+  "id": "09-search-kb-then-write",
+  "prompt": "Step 1: Use search_kb to search for 'Day 3 write_file grep' (max_results=2). Step 2: Use write_file to write a short summary (at least 1 line) of what you found to target/eval-tc09.txt. Step 3: Reply 'RAG-DONE'.",
+  "expected": {
+    "must_call_tools": ["search_kb", "write_file"],
+    "must_contain_in_final": ["RAG-DONE"],
+    "max_steps": 8,
+    "max_cost_usd": 0.15
+  },
+  "post_check": {
+    "type": "file_contains",
+    "path": "target/eval-tc09.txt",
+    "content": "Day 3"
+  }
+}

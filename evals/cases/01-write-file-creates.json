@@ -1,0 +1,15 @@
+{
+  "id": "01-write-file-creates",
+  "prompt": "Use the write_file tool to create a file at target/eval-tc01.txt with the exact content 'eval-tc01-payload'. Do not call any other tools. After writing, reply 'done'.",
+  "expected": {
+    "must_call_tools": ["write_file"],
+    "must_contain_in_final": ["done"],
+    "max_steps": 5,
+    "max_cost_usd": 0.10
+  },
+  "post_check": {
+    "type": "file_equals",
+    "path": "target/eval-tc01.txt",
+    "content": "eval-tc01-payload"
+  }
+}

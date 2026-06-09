@@ -1,0 +1,10 @@
+{
+  "id": "06-get-current-time",
+  "prompt": "Use the get_current_time tool to get the current time. After getting it, reply with just the time string and the word 'TIME-DONE' on the same line.",
+  "expected": {
+    "must_call_tools": ["get_current_time"],
+    "must_contain_in_final": ["TIME-DONE"],
+    "max_steps": 3,
+    "max_cost_usd": 0.05
+  }
+}

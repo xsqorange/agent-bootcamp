@@ -62,6 +62,9 @@
                 <version>3.13.0</version>
                 <configuration>
                     <release>17</release>
+                    <!-- Day 5: -parameters 让 record 组件名保留进 class 文件,
+                         否则 Jackson 反序列化 record 时只能看到 arg0/arg1 -->
+                    <parameters>true</parameters>
                 </configuration>
             </plugin>
 
