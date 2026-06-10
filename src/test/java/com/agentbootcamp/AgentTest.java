@@ -247,11 +247,14 @@ class AgentTest {
             + ", answer='" + result.finalAnswer() + "'");
 
         assertEquals(StopReason.FINAL_ANSWER, result.stopReason());
-        String lower = result.finalAnswer().toLowerCase();
-        assertTrue(lower.contains("write_file") || lower.contains("write file"),
-            "TC-12: 答案应提到 'write_file', 实际: " + result.finalAnswer());
-        assertTrue(lower.contains("grep"),
-            "TC-12: 答案应提到 'grep', 实际: " + result.finalAnswer());
+        // Pitfall #20 (Day 5 README): 模型可能说 "WriteFile" / "write_file" / "write file" / "write-file",
+        // 都接受 — normalize 去下划线/连字符/空格后,只要含 "writefile" 即过。
+        String tc12Normalized = result.finalAnswer().toLowerCase()
+            .replace("_", "").replace("-", "").replace(" ", "");
+        assertTrue(tc12Normalized.contains("writefile"),
+            "TC-12: 答案应提到 write_file/WriteFile/write file/write-file, 实际: " + result.finalAnswer());
+        assertTrue(tc12Normalized.contains("grep"),
+            "TC-12: 答案应提到 grep, 实际: " + result.finalAnswer());
     }
 
     // ====================================================================
