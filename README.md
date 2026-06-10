@@ -553,8 +553,8 @@ export LLM_MODEL="deepseek-chat"
 | 1 | 2026-06-05 | ✅ 项目骨架 + LlmClient + 3 tools | 推到 GitHub: `xsqorange/agent-bootcamp` |
 | 2 | 2026-06-06 | ✅ ReAct 循环 + StopReason + JSONL trace | 5 个黄金测试用例待跑通 |
 | 3 | 2026-06-07 | ✅ + 2 工具 (write_file, grep) + 10 黄金用例 + 修 2 个 Day 2 bug | 15 个测试 (10 单元 + 5 端到端) 全过 |
-| 4 | 2026-06-08 | ✅ + MemoryManager + RagIndex + search_kb (6 工具) + 5 知识库 .md | 42 个测试 (24 单元 + 8 端到端) 全过, 编译 0 warning, 本地 day4 分支 (未 push 未 merge) |
-| **5** | **2026-06-09** | **✅ + EvalHarness + 10 黄金用例 JSON + JUnit 动态测试 + 429 retry** | **52 个测试 (32 单元 + 20 端到端) 全过, mvn verify ~3 分钟, 烧 $0.0081, 本地 day5 分支 (未 push 未 merge)** |
+| 4 | 2026-06-08 | ✅ + MemoryManager + RagIndex + search_kb (6 工具) + 5 知识库 .md | 42 个测试 (24 单元 + 8 端到端) 全过, 编译 0 warning, 已 push + merge 到 main |
+| **5** | **2026-06-09** | **✅ + EvalHarness + 10 黄金用例 JSON + JUnit 动态测试 + 429 retry** | **52 个测试 (32 单元 + 20 端到端) 全过, mvn verify ~3 分钟, 烧 $0.0081, 已 push + merge 到 main** |
 
 ## 贡献 / Contributing
 
