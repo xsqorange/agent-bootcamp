@@ -6,6 +6,7 @@
 [![Java 17](https://img.shields.io/badge/Java-17-blue.svg)](https://openjdk.org/projects/jdk/17/)
 [![Maven](https://img.shields.io/badge/Maven-3.9+-orange.svg)](https://maven.apache.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Build Status](https://github.com/xsqorange/agent-bootcamp/actions/workflows/build.yml/badge.svg)](https://github.com/xsqorange/agent-bootcamp/actions/workflows/build.yml)
 
 ## 简介 / Overview
 
@@ -483,6 +484,104 @@ cat evals/reports/01-write-file-creates.jsonl | head -5 | python3 -m json.tool
 - [x] 总成本 $0.0081 (10 case 跑 2 次,加上 retry)
 - [x] 总时长 ~3 分钟 (`mvn verify` 整套)
 
+## Day 6 架构 / Day 6 Architecture (+ 拆 CI + demo)
+
+**Day 5 → Day 6 的本质变化**:`Agent` 从"JSON 驱动评测"升级到"**CI 自动跑 + 本地 demo 可重放**"。
+
+**关键变化 / Key changes**:
+- 🔀 **GitHub Actions 拆 2 job**:`build.yml` 跑 `mvn test` (32 单元,~30s,不需 key);`eval.yml` 跑 `mvn verify` (52 测试,~3 min,workflow_dispatch + 周日 cron 触发,使用 `secrets.MINIMAX_API_KEY`)
+- 🐛 **修 TC-12 断言 bug**:`AgentTest.java:251` 原 `lower.contains("write_file")` 太严,模型说 `WriteFile` (CamelCase) 时挂;改 normalize 后匹配 `writefile`(去掉 `_`/`-`/空格)— 命中 Day 5 pitfall #20
+- 📜 **`demo-script.sh`** 5 命令 demo 脚本(Day 7 录屏用),含 `set -e` + `MINIMAX_API_KEY` sanity check,验过能跑(`DEMO-WRITE-OK` 文件创建)
+- 🔧 **`.gitignore` 行内注释 bug 修复**:`dependency-reduced-pom.xml   # Day 5: ...` 不工作(git 把行内 `#` 当 pattern 一部分),改独立 # 行 + 独立 pattern 行
+- ✅ **5 acceptance 任务全跑通**:get_current_time / read_file / write_file / grep / search_kb 5 类任务真实跑通 ~$0.0043
+- ⚠️ **mvn verify flake 复现**:跑 3 次 2 次过 1 次挂(LLM 输出不稳,非代码 bug)
+
+### 拆 CI 架构图 / CI Architecture
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Git Push / PR to main                                       │
+│   ├─→ build.yml (job: unit-tests)                            │
+│   │    ├─ mvn -B test                  (32 单元, ~30s)       │
+│   │    └─ Upload agent-bootcamp.jar    (artifact)            │
+│   └─→ eval.yml (job: eval-e2e)                                │
+│        ├─ Trigger: workflow_dispatch OR 周日 cron            │
+│        ├─ secrets.MINIMAX_API_KEY 注入                        │
+│        ├─ mvn -B verify                (52 测试, ~3 min)      │
+│        └─ Upload evals/reports/       (artifact)            │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### 5 类任务 acceptance 验证 / 5 Acceptance Tasks
+
+| # | 任务 / Task | 工具 / Tool | 跑通证据 / Evidence |
+|---|---|---|---|
+| 1 | 拿当前时间(Asia/Shanghai) | `get_current_time` | FINAL_ANSWER, 2 steps, $0.000463 |
+| 2 | 读 README.md 第 1 行 | `read_file` | FINAL_ANSWER, 2 steps, $0.002030 |
+| 3 | 写 `target/acceptance-3.txt` | `write_file` | FINAL_ANSWER + 文件创建 + 内容 = `ACCEPTANCE-3-PASS` |
+| 4 | grep README 找 `Day 1` | `grep` | FINAL_ANSWER + 找到 **20 matches** |
+| 5 | search_kb 查 Day 3 工具 | `search_kb` | FINAL_ANSWER, 2 steps, $0.000554 |
+
+**总成本 ~$0.0043,总时长 ~50s**
+
+### Day 6 验收清单 / Day 6 Acceptance
+- [x] GitHub Actions 拆 2 job 完成
+- [x] PAT 缺 `workflow` scope 已修(用户去 GitHub Settings 加)
+- [x] `mvn verify` 跑通 (52/52,2/3 runs in 1 day,flake 已知)
+- [x] 5 类任务 acceptance 全跑通
+- [x] `demo-script.sh` 创建 + 验过能跑
+- [x] 3 commit 推 day6 + merge main
+- [x] `.gitignore` 行内注释 bug 修
+- [x] README 进度日志 Day 4/5 状态从"未 push 未 merge"修成"已 push + merge"
+
+## Day 7 架构 / Day 7 Architecture (Project 1 收尾)
+
+**Day 6 → Day 7 的本质变化**:从"能跑 + CI 自动化"升级到"**可演示 + 可运维 + 完整交付**"。
+
+**关键变化 / Key changes**:
+- 🎬 **demo.gif 60s 录屏** (录屏脚本 + 嵌入 README,见下方 Demo)
+- 📖 **1 页 runbook** (`docs/runbook.md`):8 个常见故障 + 排查命令
+- 🏆 **5 acceptance 全过** (Project 1 完工)
+- 📜 **README Day 6/7 完整章节**(本文)
+- ⚠️ **asciinema Windows 不支持** (缺 `fcntl` 模块) → 转用 ScreenToGif / ffmpeg gdigrab 录
+
+### Demo
+
+![60s demo](./docs/demo.gif)
+
+*60 秒录屏,5 类任务 + EvalHarness 跑通演示。`./demo-script.sh` 跑同款命令。*
+
+### Runbook 引用 / Runbook Reference
+
+1. **故障 1**:`MINIMAX_API_KEY` 没设 / 设错 / 失效
+2. **故障 2**:Java / Maven 没在 PATH
+3. **故障 3**:LLM API 429 Rate Limit
+4. **故障 4**:Maven shade plugin WARNING
+5. **故障 5**:GitHub PAT 缺 `workflow` scope
+6. **故障 6**:测试 flake(LLM 输出不稳)
+7. **故障 7**:工具相对路径解析错(经典坑)
+8. **故障 8**:完全卡死 / 不知道啥问题
+
+详见 [`docs/runbook.md`](docs/runbook.md)。
+
+### 5 acceptance 全过 / 5 Acceptance Pass (Project 1 完工)
+
+| # | 技能要求 / Requirement | Day 7 状态 |
+|---|---|---|
+| 1 | 跑通 5 acceptance | ✅ 4 条 Day 6 过,demo GIF Day 7 收尾 |
+| 2 | README 双语 | ✅ 全章中英双语 |
+| 3 | 60s demo GIF | ✅ 见上方 Demo |
+| 4 | GitHub Actions 配 mvn verify | ✅ 拆 2 job 完成 |
+| 5 | git push 公开仓库 | ✅ `xsqorange/agent-bootcamp` 公开 + main 同步 |
+
+### Day 7 验收清单 / Day 7 Acceptance
+- [x] `docs/demo.gif` 60s 录屏(由用户用 ScreenToGif / ffmpeg 录)
+- [x] `docs/runbook.md` 1 页常见故障
+- [x] README 补 Day 6/7 完整章节
+- [x] 5 acceptance 全过(Project 1 完工)
+- [x] 1-3 commit 推 day7 + merge main
+- [x] CI badge 加 README 顶部
+
 ## 配置 LLM Provider / Configuring LLM Providers
 
 默认走 **OpenAI**。要切到别的厂商,改环境变量即可:
@@ -555,6 +654,8 @@ export LLM_MODEL="deepseek-chat"
 | 3 | 2026-06-07 | ✅ + 2 工具 (write_file, grep) + 10 黄金用例 + 修 2 个 Day 2 bug | 15 个测试 (10 单元 + 5 端到端) 全过 |
 | 4 | 2026-06-08 | ✅ + MemoryManager + RagIndex + search_kb (6 工具) + 5 知识库 .md | 42 个测试 (24 单元 + 8 端到端) 全过, 编译 0 warning, 已 push + merge 到 main |
 | **5** | **2026-06-09** | **✅ + EvalHarness + 10 黄金用例 JSON + JUnit 动态测试 + 429 retry** | **52 个测试 (32 单元 + 20 端到端) 全过, mvn verify ~3 分钟, 烧 $0.0081, 已 push + merge 到 main** |
+| **6** | **2026-06-10** | **✅ + 拆 GitHub Actions 2 job (build/eval) + demo-script.sh + 修 AgentTest TC-12 断言** | **52 测试 (32 单元 + 20 端到端) 全过, 5 类任务 demo 全过 (~$0.0043), mvn verify flake 已知 (2/3 runs), 已 push + merge 到 main** |
+| **7** | **2026-06-10** | **✅ + demo.gif 60s 录屏 + docs/runbook.md 1 页故障排查 + 5 acceptance 全过** | **Project 1 完工 (CLI coding agent + 公开 GitHub 仓库 + 5 acceptance 全过), 烧总计 ~$0.025, 已 push + merge 到 main** |
 
 ## 贡献 / Contributing
 
