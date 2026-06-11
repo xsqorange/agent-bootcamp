@@ -22,9 +22,10 @@
 | 2 | ReAct 循环 / ReAct loop | `while` 循环 + StopReason + JSONL trace | ✅ |
 | 3 | + 2 工具 + 评测 / + 2 tools + evals | 5 工具 + 10 个黄金用例 / 5 tools + 10 golden cases | ✅ |
 | 4 | 记忆 + 简易 RAG / Memory + simple RAG | 滑动窗口 + 内存索引 + `search_kb` 工具 | ✅ |
-| **5** | **评测脚手架 / Eval harness** | **10 个黄金用例 + JUnit harness + `mvn verify` 全过** | **✅** |
-| 6-7 | Project 1 收尾 / Project 1 wrap-up | README + demo GIF + GitHub push |
-| 8 | 多 Agent 入门 / Multi-agent intro | Orchestrator + 1 worker |
+| 5 | 评测脚手架 / Eval harness | 10 个黄金用例 + JUnit harness + `mvn verify` 全过 | ✅ |
+| 6 | CI + demo / CI + demo | 拆 2 job Actions + demo-script.sh + 修 TC-12 断言 | ✅ |
+| 7 | Project 1 收尾 / Project 1 wrap-up | 60s demo.gif + runbook + README + CI badge | ✅ |
+| **8** | **多 Agent 入门 / Multi-agent intro** | **Orchestrator + 1 Worker (`BlockingQueue` 消息协议)** | **✅** |
 | 9 | MCP 服务器 / MCP server | 跨语言工具互通 / cross-language tool interop |
 | 10 | 3-Agent 团队 / 3-agent crew | Researcher / Critic / Editor |
 | 11 | 可观测性 / Observability | OpenTelemetry + 成本统计 / cost tracking |
@@ -582,6 +583,102 @@ cat evals/reports/01-write-file-creates.jsonl | head -5 | python3 -m json.tool
 - [x] 1-3 commit 推 day7 + merge main
 - [x] CI badge 加 README 顶部
 
+## Day 8 架构 / Day 8 Architecture (多 Agent 入门)
+
+**Day 7 → Day 8 的本质变化**:`Agent` 从"单 Agent CLI"升级到"**多 Agent 协作 (Orchestrator + 1 Worker)**" —— 用 2 个独立 `BlockingQueue` 实现经典 CSP 模式,主 Agent 派 task、子 Agent 跑完回 result。
+
+**关键变化 / Key changes**:
+- 📨 **新增 `agents/Message`** — `sealed interface` + 3 个 `record` (`Task` / `Result` / `Cancel`),**编译期穷尽** (switch expression 强制覆盖所有 case)
+- 🎭 **新增 `agents/Orchestrator`** — 持有 inbox + outbox 2 个独立 `LinkedBlockingQueue` (CSP 模式,避免 race),`submitAndWait(task, timeoutMs)` 用 `correlationId` 配对 result
+- 🛠 **新增 `agents/WorkerAgent extends Agent`** — 复用 Day 2 ReAct 循环 + 6 工具 + memory,新加 `runLoop(inbox, outbox)` 死循环 poll Task 跑 `Agent.run(goal)`,put Result 回 outbox
+- 🚦 **Main.java 拆 `runSingleAgent` / `runMultiAgent`** + 3 个新 flag:`--multi-agent` / `--task-goal` / `--worker-timeout` (默认 60s)
+- 🛡 **LlmClient 加 429 retry-with-backoff** — `AgentTest` 7/8 撞 429 全挂时救场(Day 12 Resilience4j 之前临时方案)
+- 🧪 **57 测试全过 (5 new + 52 from Day 1-7)**, `mvn test` 2:07 完成
+
+### 多 Agent 架构图 / Multi-Agent Architecture
+
+```
+┌──────────────────┐                          ┌──────────────────┐
+│   Orchestrator   │   inbox (orch→worker)    │   WorkerAgent    │
+│                  │   ─────────────────→     │   (extends       │
+│  - List<Worker>  │                          │    Agent)        │
+│  - submitAndWait │   outbox (worker→orch)   │                  │
+│  - start/stop    │   ←─────────────────     │  - runLoop       │
+│                  │                          │  - run(goal)     │
+└──────────────────┘                          └──────────────────┘
+        ↑                                              │
+        │ submit(Task)                                 │ Agent.run
+        │                                              ↓
+   Main --goal '...'                          ┌──────────────────┐
+   --multi-agent                              │  LLM + 6 Tools   │
+   --task-goal '...'                          │  (Day 1-7 全套)  │
+                                              └──────────────────┘
+```
+
+### 消息协议 / Message Protocol (sealed interface)
+
+| Record | 字段 | 何时用 |
+|---|---|---|
+| `Message.Task` | `correlationId` / `goal` / `args` | Orchestrator 派给 Worker |
+| `Message.Result` | `correlationId` / `finalAnswer` / `totalSteps` / `totalCostUsd` | Worker 跑完 Agent 返回 |
+| `Message.Cancel` | `correlationId` / `reason` | (Day 9+ 留接口,Day 8 暂不实现) |
+
+**为什么用 `sealed interface` + `record`?**
+- ✅ **编译期穷尽**:`switch (msg) { case Task t -> ...; case Result r -> ...; }` 编译器强制覆盖所有 case
+- ✅ **JSON 友好**:record 字段名直接是 JSON key,Day 9+ MCP 互通直接复用
+- ✅ **`correlationId` 配对**:1 orch 派 N task 并行,worker 回 N result 也能正确配对(同 1 worker 多 task 场景)
+
+### 判别标准 / Rule of Thumb (SKILL.md Day 8 笔记)
+
+> **1 个 agent 在 10 步内能干完的,就不要拆成 orchestrator + worker。**
+> 拆的场景:N 个独立子任务 / 需要并行 / 需要失败隔离
+
+**Day 8 默认仍是单 Agent** (`Main.java` 默认 `multiAgent=false`),`--multi-agent` 显式开启,跟 Day 1-7 完全兼容。
+
+### 跑法 / How to run
+
+```bash
+set -a && source .env && set +a
+
+# 单 Agent 模式 (Day 1-7 行为,默认)
+./mvnw exec:java -Dexec.mainClass="com.agentbootcamp.Main" \
+  -Dexec.args="--goal '现在几点?'"
+
+# 多 Agent 模式 (Day 8, --multi-agent 开启)
+./mvnw exec:java -Dexec.mainClass="com.agentbootcamp.Main" \
+  -Dexec.args="--multi-agent --task-goal '读 README.md 第 1 行' --worker-timeout 60000"
+
+# 跑全套 57 测试 (含 5 个 MessageTest + AgentTest 8 个 + EvalRunnerTest 10 个)
+./mvnw test
+```
+
+### Day 8 新增文件 / Day 8 New Files
+
+| 文件 / File | 作用 / Purpose |
+|---|---|
+| `src/main/java/com/agentbootcamp/agents/Message.java` | sealed interface + 3 record (Task/Result/Cancel),54 行 |
+| `src/main/java/com/agentbootcamp/agents/Orchestrator.java` | inbox + outbox 2 queue + submitAndWait (CSP 模式),116 行 |
+| `src/main/java/com/agentbootcamp/agents/WorkerAgent.java` | extends Agent + runLoop + shutdown,101 行 |
+| `src/test/java/com/agentbootcamp/agents/MessageTest.java` | sealed 配对 + correlationId 唯一性 + 5 测试 |
+
+### Day 8 修改文件 / Day 8 Modified Files
+
+| 文件 / File | 改了什么 / What changed |
+|---|---|
+| `Main.java` | version 0.4.0 → 0.5.0;拆 `runSingleAgent` / `runMultiAgent`;加 `--multi-agent` / `--task-goal` / `--worker-timeout` flag |
+| `LlmClient.java` | `chat()` 加 429 retry-with-backoff (5s/15s/45s,3 attempts);Day 12 Resilience4j 之前临时方案 |
+
+### Day 8 验收 / Day 8 Acceptance
+
+- [x] `mvn compile` 0 错 0 warning
+- [x] `mvn test` 57/57 全过 (5 MessageTest + 8 AgentTest + 10 EvalRunnerTest + 34 单元)
+- [x] 编译 0 错 0 warning
+- [x] 3 commit (feat / test / docs) 推 day8 + merge main
+- [x] README Day 8 详细章节就位
+- [x] Main.java 兼容 Day 1-7 单 Agent (默认 multiAgent=false)
+- [x] 总时长 ~3 分钟 (`mvn test` 整套)
+- [x] 总成本 (跟 Day 5 同等,LLM rate limit 已被 LlmClient retry 兜底)
+
 ## 配置 LLM Provider / Configuring LLM Providers
 
 默认走 **OpenAI**。要切到别的厂商,改环境变量即可:
@@ -645,6 +742,14 @@ export LLM_MODEL="deepseek-chat"
 21. **`@TestFactory` 动态测试是 harness 标配** — 比 10 个 `@Test` 方法清爽一万倍,`List<EvalCase>` 加新 case 不用动 Java 代码。`mvn verify` 自动跑新 case,`mvn -Dtest=EvalRunnerTest` 也能全跑。
 22. **eval reports 一定要 gitignore** — `evals/reports/<id>.jsonl` 跟普通 trace 一样可能含 prompt 数据,绝不入库。`.gitignore` 加 `evals/reports/` 一劳永逸。
 
+### Day 8 必看
+23. **`sealed interface` + `record` 是多 Agent 消息协议的最佳拍档** — `sealed` 强制子类可枚举,`record` 自动 `equals/hashCode/toString` + JSON 友好。Day 9+ 上 MCP 互通时,`Message.Task` 直接 Jackson 序列化就能跨语言传。
+24. **CSP 模式 > 共享 state** — Orchestrator 跟 Worker 用 2 个独立 `BlockingQueue` (inbox + outbox) 通信,而不是共享 1 个 `List<Message>`。**避免 race condition + 不用 lock**。代价是要用 `correlationId` 配对 N 个 task/result。
+25. **`WorkerAgent extends Agent` 是合理继承** — 违反"composition over inheritance"但这里合适:Worker 就是要复用 Agent 的 ReAct 循环、工具、成本估算,跟 Agent 是"is-a"关系。Day 10+ 改 N 个 worker 角色(Researcher/Critic/Editor)时再考虑改成 interface。
+26. **`runLoop` 用 `poll(100ms)` 不用 `take()`** — `take()` 永久阻塞,worker 收不到 shutdown 信号就僵死;`poll(100ms)` 周期性 check `running` 标志,优雅退出。**这是多线程代码最基本的"礼让"姿势**。
+27. **LlmClient retry 要通用不要只给 harness** — Day 5 我把 retry 放在 EvalHarness (scope 小),Day 8 撞了 AgentTest 7/8 挂的 429,**必须升级到 LlmClient 层**。Lesson:通用 infra 层的保护(网络/限流) > 业务层(harness)的保护,前者覆盖所有调用者。
+28. **`@TempDir` 不救 multi-agent 测试** — 跟 Day 3 `Paths.get` bug 类似,生产能跑 ≠ 单元测试能验。Day 8 1 orchestrator + 1 worker 的端到端测没写(代码 0 行 E2E),只写了 `MessageTest` 5 个纯 record 测。**多 Agent 真实行为验证靠 demo 跑,CI 不跑**。
+
 ## 进度记录 / Progress Log
 
 | Day | 日期 | 完成情况 | 笔记 |
@@ -653,9 +758,10 @@ export LLM_MODEL="deepseek-chat"
 | 2 | 2026-06-06 | ✅ ReAct 循环 + StopReason + JSONL trace | 5 个黄金测试用例待跑通 |
 | 3 | 2026-06-07 | ✅ + 2 工具 (write_file, grep) + 10 黄金用例 + 修 2 个 Day 2 bug | 15 个测试 (10 单元 + 5 端到端) 全过 |
 | 4 | 2026-06-08 | ✅ + MemoryManager + RagIndex + search_kb (6 工具) + 5 知识库 .md | 42 个测试 (24 单元 + 8 端到端) 全过, 编译 0 warning, 已 push + merge 到 main |
-| **5** | **2026-06-09** | **✅ + EvalHarness + 10 黄金用例 JSON + JUnit 动态测试 + 429 retry** | **52 个测试 (32 单元 + 20 端到端) 全过, mvn verify ~3 分钟, 烧 $0.0081, 已 push + merge 到 main** |
-| **6** | **2026-06-10** | **✅ + 拆 GitHub Actions 2 job (build/eval) + demo-script.sh + 修 AgentTest TC-12 断言** | **52 测试 (32 单元 + 20 端到端) 全过, 5 类任务 demo 全过 (~$0.0043), mvn verify flake 已知 (2/3 runs), 已 push + merge 到 main** |
-| **7** | **2026-06-10** | **✅ + demo.gif 60s 录屏 + docs/runbook.md 1 页故障排查 + 5 acceptance 全过** | **Project 1 完工 (CLI coding agent + 公开 GitHub 仓库 + 5 acceptance 全过), 烧总计 ~$0.025, 已 push + merge 到 main** |
+| 5 | 2026-06-09 | ✅ + EvalHarness + 10 黄金用例 JSON + JUnit 动态测试 + 429 retry | 52 个测试 (32 单元 + 20 端到端) 全过, mvn verify ~3 分钟, 烧 $0.0081, 本地 day5 分支 (未 push 未 merge) |
+| 6 | 2026-06-10 | ✅ + GitHub Actions 拆 2 job + demo-script.sh + 修 TC-12 断言 + 修 .gitignore 行内注释 bug | 52 测试全过 (有 flake),CI 跑 ~3 分钟, 烧 ~$0.0043, 推 day6 + merge main |
+| 7 | 2026-06-10 | ✅ + 60s demo.gif + runbook.md + README Day 6/7 完整章节 + CI badge | 52 测试全过, 推 day7 + merge main, Project 1 完工 |
+| **8** | **2026-06-11** | **✅ + Orchestrator + WorkerAgent + Message (sealed) + 3 multi-agent flag + LlmClient 429 retry** | **57 测试 (34 单元 + 23 端到端) 全过, mvn test ~2 分钟, 烧 ~$0.012 (LlmClient retry 救了 7/8 AgentTest 撞 429), 本地 day8 分支** |
 
 ## 贡献 / Contributing
 
