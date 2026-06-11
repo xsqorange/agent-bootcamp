@@ -66,7 +66,29 @@ public class LlmClient {
             .POST(HttpRequest.BodyPublishers.ofString(payload))
             .build();
 
-        HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+        // Day 8: 429 retry-with-backoff (Day 12 会被 Resilience4j 替换)
+        // AgentTest 没 retry 时碰到 429 会全挂;EvalHarness 已有,但 LlmClient 通用更稳
+        HttpResponse<String> resp = null;
+        RuntimeException lastError = null;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            try {
+                resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+            } catch (java.io.IOException ioe) {
+                throw new RuntimeException("LLM HTTP send failed: " + ioe.getMessage(), ioe);
+            }
+            if (resp.statusCode() != 429) break;  // 非 429 直接 break,后面正常校验
+            lastError = new RuntimeException("LLM call failed: 429 (attempt " + (attempt + 1) + "/3)");
+            long waitSec = (long) Math.pow(3, attempt) * 5;  // 5s, 15s, 45s
+            log.warn("LLM 429 rate limit, 等 {}s 后重试 ({}/3)...", waitSec, attempt + 1);
+            try {
+                Thread.sleep(waitSec * 1000);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("Retry interrupted", ie);
+            }
+        }
+        if (resp == null) throw lastError != null ? lastError : new RuntimeException("LLM call failed: no response");
+
         log.debug("← Status {}: {}", resp.statusCode(),
             resp.body().length() > 500 ? resp.body().substring(0, 500) + "..." : resp.body());
 

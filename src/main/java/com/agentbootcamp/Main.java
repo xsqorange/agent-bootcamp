@@ -1,5 +1,8 @@
 package com.agentbootcamp;
 
+import com.agentbootcamp.agents.Message;
+import com.agentbootcamp.agents.Orchestrator;
+import com.agentbootcamp.agents.WorkerAgent;
 import com.agentbootcamp.tools.Exec;
 import com.agentbootcamp.tools.GetCurrentTime;
 import com.agentbootcamp.tools.Grep;
@@ -31,9 +34,9 @@ import java.util.List;
 @Command(
     name = "myagent",
     mixinStandardHelpOptions = true,
-    version = "agent-bootcamp 0.4.0",
-    description = "Day 4: 6 tools (search_kb added) + memory (sliding window) + RAG (in-memory index). " +
-                  "6 tools + memory + simple RAG."
+    version = "agent-bootcamp 0.5.0",
+    description = "Day 8: 6 tools + memory + RAG + multi-agent (Orchestrator + Worker via BlockingQueue). " +
+                  "6 tools + memory + simple RAG + 1 orchestrator + 1 worker."
 )
 public class Main implements Runnable {
 
@@ -67,6 +70,20 @@ public class Main implements Runnable {
         defaultValue = "false")
     private boolean dryRun;
 
+    @Option(names = {"--multi-agent"},
+        description = "启用多 Agent 模式(Day 8): Orchestrator + 1 Worker / Enable multi-agent mode",
+        defaultValue = "false")
+    private boolean multiAgent;
+
+    @Option(names = {"--task-goal"},
+        description = "派给 worker 的子任务(仅 --multi-agent)/ Sub-task dispatched to worker (multi-agent only)")
+    private String taskGoal;
+
+    @Option(names = {"--worker-timeout"},
+        description = "worker 等 result 超时 ms(默认 ${DEFAULT-VALUE})/ Worker result timeout ms (default ${DEFAULT-VALUE})",
+        defaultValue = "60000")
+    private long workerTimeoutMs;
+
     public static void main(String[] args) {
         int rc = new CommandLine(new Main()).execute(args);
         System.exit(rc);
@@ -77,7 +94,8 @@ public class Main implements Runnable {
         try {
             log("目标 / Goal: " + goal);
             log("参数 / Args: maxSteps=" + maxSteps + ", maxCost=$" + maxCost
-                + ", trace=" + tracePath + ", memory=" + (noMemory ? "off" : "on"));
+                + ", trace=" + tracePath + ", memory=" + (noMemory ? "off" : "on")
+                + ", multiAgent=" + multiAgent);
 
             // 0. 加载知识库 (Day 4)
             Path knowledgeDir = findKnowledgeDir();
@@ -95,44 +113,85 @@ public class Main implements Runnable {
                 return;
             }
 
-            // 1. LLM 配置 / read LLM config from env
-            LlmConfig config = LlmConfig.fromEnv();
-
-            // 2. LLM 客户端 / build LLM client
-            LlmClient llm = new LlmClient(config);
-
-            // 3. 工具 / register tools (Day 4: 6 tools total)
-            List<Tool> tools = buildTools(ragIndex);
-            log("已注册 " + tools.size() + " 个工具: " +
-                tools.stream().map(Tool::name).toList());
-
-            // 4. Memory (Day 4)
-            MemoryManager memory = noMemory ? null : new MemoryManager();
-            log("Memory: " + (memory != null
-                ? "enabled (threshold: msgs>24 OR tokens>10000)"
-                : "disabled"));
-
-            // 5. Trace(用 try-with-resources 自动 close)
-            try (TraceWriter trace = new TraceWriter(tracePath)) {
-                Agent agent = new Agent(llm, tools, trace, maxSteps, maxCost, memory);
-
-                // 6. 跑 / run
-                RunResult result = agent.run(goal);
-
-                // 7. 输出 / output
-                System.out.println();
-                System.out.println("=== Agent 回答 / Agent's answer ===");
-                System.out.println(result.finalAnswer());
-                System.out.println("====================================");
-                System.out.println("统计 / Stats: " + result.summary());
-                if (!"off".equalsIgnoreCase(tracePath)) {
-                    System.out.println("Trace:  " + Path.of(tracePath).toAbsolutePath());
-                }
+            // 分支: multi-agent (Day 8) vs single-agent (Day 1-7)
+            if (multiAgent) {
+                runMultiAgent(ragIndex);
+            } else {
+                runSingleAgent(ragIndex);
             }
         } catch (Exception e) {
             System.err.println("执行失败: " + e.getMessage());
             e.printStackTrace();
             System.exit(1);
+        }
+    }
+
+    /** Day 1-7: 单 Agent 跑 / Single Agent run. */
+    private void runSingleAgent(RagIndex ragIndex) throws Exception {
+        LlmConfig config = LlmConfig.fromEnv();
+        LlmClient llm = new LlmClient(config);
+        List<Tool> tools = buildTools(ragIndex);
+        log("已注册 " + tools.size() + " 个工具: " + tools.stream().map(Tool::name).toList());
+        MemoryManager memory = noMemory ? null : new MemoryManager();
+        log("Memory: " + (memory != null
+            ? "enabled (threshold: msgs>24 OR tokens>10000)"
+            : "disabled"));
+
+        try (TraceWriter trace = new TraceWriter(tracePath)) {
+            Agent agent = new Agent(llm, tools, trace, maxSteps, maxCost, memory);
+            RunResult result = agent.run(goal);
+            System.out.println();
+            System.out.println("=== Agent 回答 / Agent's answer ===");
+            System.out.println(result.finalAnswer());
+            System.out.println("====================================");
+            System.out.println("统计 / Stats: " + result.summary());
+            if (!"off".equalsIgnoreCase(tracePath)) {
+                System.out.println("Trace:  " + Path.of(tracePath).toAbsolutePath());
+            }
+        }
+    }
+
+    /**
+     * Day 8: Orchestrator + 1 Worker 跑 / Orchestrator + 1 Worker run.
+     * 派 1 个 task(默认用 --goal,也可用 --task-goal 覆盖)给 worker,等 result。
+     */
+    private void runMultiAgent(RagIndex ragIndex) throws Exception {
+        LlmConfig config = LlmConfig.fromEnv();
+        LlmClient llm = new LlmClient(config);
+        List<Tool> tools = buildTools(ragIndex);
+        MemoryManager memory = noMemory ? null : new MemoryManager();
+        log("已注册 " + tools.size() + " 个工具: " + tools.stream().map(Tool::name).toList());
+        log("Memory: " + (memory != null ? "enabled" : "disabled"));
+        log("Multi-agent: 1 Orchestrator + 1 Worker");
+
+        // worker trace 写到独立文件,避免和 Main 的 trace 冲突
+        String workerTrace = "off".equalsIgnoreCase(tracePath) ? "off" : "target/worker-trace.jsonl";
+        try (TraceWriter trace = "off".equalsIgnoreCase(workerTrace)
+                ? null
+                : new TraceWriter(workerTrace)) {
+            WorkerAgent worker = new WorkerAgent("worker-1", llm, tools, trace, maxSteps, maxCost, memory);
+            Orchestrator orch = new Orchestrator(worker);
+            orch.start();
+            try {
+                String subGoal = taskGoal != null ? taskGoal : goal;
+                Message.Task task = new Message.Task(subGoal, java.util.Map.of());
+                Message.Result result = orch.submitAndWait(task, workerTimeoutMs);
+
+                System.out.println();
+                System.out.println("=== Orchestrator 收到 / Orchestrator received ===");
+                System.out.println("Task correlationId: " + task.correlationId());
+                System.out.println("Task goal:          " + task.goal());
+                System.out.println();
+                System.out.println("=== Worker 回答 / Worker's answer ===");
+                System.out.println(result.finalAnswer());
+                System.out.println("====================================");
+                System.out.println("统计 / Stats: steps=" + result.totalSteps() + ", cost=$" + result.totalCostUsd());
+                if (!"off".equalsIgnoreCase(workerTrace)) {
+                    System.out.println("Worker trace: " + Path.of(workerTrace).toAbsolutePath());
+                }
+            } finally {
+                orch.stop();
+            }
         }
     }
 
