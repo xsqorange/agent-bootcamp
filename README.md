@@ -679,6 +679,102 @@ set -a && source .env && set +a
 - [x] 总时长 ~3 分钟 (`mvn test` 整套)
 - [x] 总成本 (跟 Day 5 同等,LLM rate limit 已被 LlmClient retry 兜底)
 
+## Day 9 架构 / Day 9 Architecture (MCP 服务器 / 跨语言工具互通)
+
+**Day 8 → Day 9 的本质变化**:`Agent` 的工具从"Java 内部"升级到"**跨语言协议**" — Python 客户端能调 Java 服务端的 `read_file` / `write_file` / `exec` / `get_current_time`,证明工具不只是 Java 内部事。
+
+**关键变化 / Key changes**:
+- 🌐 **自实现 MCP 协议子集** (JSON-RPC 2.0 over stdio) — 不用官方 Java SDK (Maven Central 2026-06 只有 Kotlin SDK,无 Java 制品)
+- 🐍 **Python stdlib client** — 0 依赖,`subprocess` + `json` 跟 Java server 通信
+- 🔄 **跨语言 E2E 7 用例** — Python client 调 Java server 调 Java Tool,Python 读回文件验内容
+- ⚠️ **3 个真坑** (见下方,Day 9 预知坑 100% 命中)
+
+### 协议核心 / Protocol Core
+- **传输**:stdio (一行一个 JSON,UTF-8,无 HTTP)
+- **格式**:JSON-RPC 2.0
+- **5 个方法**:`initialize` / `tools/list` / `tools/call` / `ping` / `notifications/initialized`
+- **MCP protocol version**:`2024-11-05`
+
+### 跨语言架构图 / Cross-Language Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  Python client.py (stdlib, 0 依赖)                                  │
+│    ├─ McpClient.initialize()     → 握手 (serverInfo + caps)        │
+│    ├─ McpClient.list_tools()     → 4 工具 schema                   │
+│    └─ McpClient.call_tool(name, args) → 调工具                     │
+│       ↓ (JSON-RPC 2.0 over stdin/stdout, 一行一个 JSON)            │
+│  Java McpServerMain (新进程, subprocess.spawn)                     │
+│    ├─ runServer() 主循环   → 读 stdin 一行                          │
+│    ├─ handleRequest()     → 解析 JSON, 路由 method                  │
+│    ├─ tools/list          → 返回所有 Tool schema                    │
+│    └─ tools/call          → McpToolAdapter.execute() → Tool       │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### 4 工具一览 / 4 Tools Overview
+
+| 工具 | 来自 | 用途 |
+|---|---|---|
+| `get_current_time` | Day 1 | 返回 ISO 8601 时间 |
+| `read_file` | Day 1 | 读文件 (100KB 上限) |
+| `write_file` | Day 3 | 写文件 (1MB 上限,workDir 越界防护) |
+| `exec` | Day 1 | shell 命令 (5s 超时) |
+
+### 跨语言互通证据 / Cross-Language Interop Evidence
+
+| # | Python 调用 | Java Tool 触发 | 验证 |
+|---|---|---|---|
+| 1 | `read_file({"path":"README.md"})` | `ReadFile.execute()` | 返回 **37469 字符**,含 "Agent Bootcamp" |
+| 2 | `write_file({"path":"target/...","content":"..."})` | `WriteFile.execute()` | 文件创建,Python 读回内容**完全一致** |
+| 3 | `get_current_time({})` | `GetCurrentTime.execute()` | 返回 ISO 8601 字符串,如 `2026-06-14T13:21:39.165119Z` |
+
+### 4 测试矩阵 / 4 Test Matrix
+
+| 端 | 类型 | 数量 | 文件 |
+|---|---|---|---|
+| Java | 单元 (McpToolAdapter) | 6 | `src/test/java/.../mcp/McpToolAdapterTest.java` |
+| Java | 端到端 (MCP server) | 8 | `src/test/java/.../mcp/McpServerE2ETest.java` |
+| Python | 跨语言端到端 | 7 | `mcp-client/test_e2e.py` |
+| **合计** | — | **21** | 60 Java + 7 Python = 67 测试全过 |
+
+### Day 9 三大预知坑 / 3 Real Bugs Day 9 Hit
+
+#### 坑 #1: 官方 Java MCP SDK 2026-06 还不存在
+
+- **症状**:`mvn dependency:resolve` 报 `Could not find artifact io.modelcontextprotocol:mcp-server:jar:0.5.0 in central`
+- **根因**:Maven Central 实际**只有** `io.modelcontextprotocol:kotlin-sdk*` (Kotlin Multiplatform),没有 Java 制品
+- **修法**:**自实现 MCP 协议子集** (~150 行 Java),跟 Python `mcp` PyPI 包协议级兼容
+- **副作用**:README pom.xml 注释说明"不用官方 SDK"原因,后人不会被技能里的 `0.5.0` 误导
+
+#### 坑 #2: stdio 跨语言编码 + 缓冲
+
+- **症状**:Python `client.py` `proc.stdout.readline()` 读不到 Java server 响应
+- **根因**:
+  - Python 端默认 `bufsize` = 0 (全缓冲) → Java 写出,Python 看不到
+  - 编码不一致 → 解析 JSON 失败
+- **修法**:
+  - Python:`subprocess.Popen(bufsize=1, encoding="utf-8")` (行缓冲 + UTF-8)
+  - Java:`new InputStreamReader(stdin, StandardCharsets.UTF_8)` + `BufferedReader`
+  - **两端都用 UTF-8 + 行缓冲**,跨语言管道才稳
+
+#### 坑 #3: 测试期望跟 server 注册不一致
+
+- **症状**:Python E2E 跑 7 个,2 个挂 (test_02_list_tools + test_05_get_current_time),server 说 "Tool not found: get_current_time"
+- **根因**:`McpServerMain.main()` 只注册 `read_file / write_file / exec`,但 Python 测试 + Java E2E 都用 `get_current_time`
+- **修法**:统一 main() 注册 4 工具 (`get_current_time` / `read_file` / `write_file` / `exec`)
+- **教训**:Java 端 `McpServerE2ETest` 自己构造了 tools map 测,所以测试通过;**生产入口** (`main()`) 跟测试**入口**不一致,集成测试才能抓
+
+### Day 9 验收清单 / Day 9 Acceptance
+- [x] `McpToolAdapter` + `McpServerMain` (Java,自实现 MCP 协议子集,~200 行)
+- [x] `McpToolAdapterTest` 6 单元 + `McpServerE2ETest` 8 端到端 (Java 端)
+- [x] `mcp-client/client.py` (Python, 0 依赖, stdlib only)
+- [x] `mcp-client/test_e2e.py` 7 跨语言 E2E (Python → Java)
+- [x] `mcp-client/README.md` (Python 端使用说明)
+- [x] 67 测试全过 (60 Java + 7 Python)
+- [x] 跨语言链路验证 (Python 写 → Java 调 WriteFile → Python 读回一致)
+- [x] README Day 9 完整章节 (本文) + 修 Day 8 进度日志 mismatch
+
 ## 配置 LLM Provider / Configuring LLM Providers
 
 默认走 **OpenAI**。要切到别的厂商,改环境变量即可:
@@ -758,10 +854,11 @@ export LLM_MODEL="deepseek-chat"
 | 2 | 2026-06-06 | ✅ ReAct 循环 + StopReason + JSONL trace | 5 个黄金测试用例待跑通 |
 | 3 | 2026-06-07 | ✅ + 2 工具 (write_file, grep) + 10 黄金用例 + 修 2 个 Day 2 bug | 15 个测试 (10 单元 + 5 端到端) 全过 |
 | 4 | 2026-06-08 | ✅ + MemoryManager + RagIndex + search_kb (6 工具) + 5 知识库 .md | 42 个测试 (24 单元 + 8 端到端) 全过, 编译 0 warning, 已 push + merge 到 main |
-| 5 | 2026-06-09 | ✅ + EvalHarness + 10 黄金用例 JSON + JUnit 动态测试 + 429 retry | 52 个测试 (32 单元 + 20 端到端) 全过, mvn verify ~3 分钟, 烧 $0.0081, 本地 day5 分支 (未 push 未 merge) |
+| 5 | 2026-06-09 | ✅ + EvalHarness + 10 黄金用例 JSON + JUnit 动态测试 + 429 retry | 52 个测试 (32 单元 + 20 端到端) 全过, mvn verify ~3 分钟, 烧 $0.0081, 已 push + merge 到 main |
 | 6 | 2026-06-10 | ✅ + GitHub Actions 拆 2 job + demo-script.sh + 修 TC-12 断言 + 修 .gitignore 行内注释 bug | 52 测试全过 (有 flake),CI 跑 ~3 分钟, 烧 ~$0.0043, 推 day6 + merge main |
 | 7 | 2026-06-10 | ✅ + 60s demo.gif + runbook.md + README Day 6/7 完整章节 + CI badge | 52 测试全过, 推 day7 + merge main, Project 1 完工 |
-| **8** | **2026-06-11** | **✅ + Orchestrator + WorkerAgent + Message (sealed) + 3 multi-agent flag + LlmClient 429 retry** | **57 测试 (34 单元 + 23 端到端) 全过, mvn test ~2 分钟, 烧 ~$0.012 (LlmClient retry 救了 7/8 AgentTest 撞 429), 本地 day8 分支** |
+| **8** | **2026-06-11** | **✅ + Orchestrator + WorkerAgent + Message (sealed) + 3 multi-agent flag + LlmClient 429 retry** | **57 测试 (34 单元 + 23 端到端) 全过, mvn test ~2 分钟, 烧 ~$0.012 (LlmClient retry 救了 7/8 AgentTest 撞 429), 已 push + merge 到 main** |
+| **9** | **2026-06-14** | **✅ + McpToolAdapter + McpServerMain (自实现 MCP 协议子集) + mcp-client/ (Python stdlib 0 依赖)** | **67 测试 (60 Java + 7 Python 跨语言) 全过, Python → Java 链路验证 (read 37469 字符 / write 文件读回一致 / get_current_time ISO 8601), 修 Day 8 进度日志 mismatch, 推 day9 + merge main** |
 
 ## 贡献 / Contributing
 
