@@ -52,3 +52,10 @@ dependency-reduced-pom.xml
 *.swp
 *.swo
 *~
+
+# Python / Python 临时文件
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
