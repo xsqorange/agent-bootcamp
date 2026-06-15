@@ -775,6 +775,95 @@ set -a && source .env && set +a
 - [x] 跨语言链路验证 (Python 写 → Java 调 WriteFile → Python 读回一致)
 - [x] README Day 9 完整章节 (本文) + 修 Day 8 进度日志 mismatch
 
+## Day 10 架构 / Day 10 Architecture (3 Agent 团队 / Code Review Pipeline)
+
+**Day 9 → Day 10 的本质变化**:从"跨语言工具互通"升级到"**多 Agent 角色分工**" — Researcher (只读) → Critic (纯推理) → Editor (写入),3 个 WorkerAgent 串行流水线,完成 PR 代码评审。
+
+**关键变化 / Key changes**:
+- 🧑‍🔬 **`ResearcherAgent`** (63 行) — 只读 worker,3 工具 (read_file / grep / exec),system prompt 严防"写文件/给建议"
+- 🔍 **`CriticAgent`** (66 行) — **零工具**,纯推理,system prompt 严防"试图调工具/读文件/编造路径"
+- ✏️ **`EditorAgent`** (62 行) — 写入 worker,3 工具 (read_file / write_file / edit_file),system prompt 严防"重构未列出的代码"
+- 🔁 **`CodeReviewOrchestrator`** (122 行) — 3 步串行流水线,每步 1 个独立 Orchestrator (避免"任一 worker 抢"模式)
+- 🆕 **`EditFile` 工具** (135 行) — old_string + new_string 精确替换,workDir 防护 + 0/1/>1 出现次数严格 fail
+- 🧪 **3 E2E 测试** — 单 worker (Researcher/Critic) + 完整 3 步流水线
+
+### 3 步流水线架构图 / 3-Step Pipeline Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  User: "review README.md"                                          │
+│   ↓                                                                │
+│  CodeReviewOrchestrator.review(goal)                              │
+│   ├─ [Step 1/3] OrchestratorR → ResearcherAgent (read_file/grep) │
+│   │          ↓ 总结事实 (finalAnswer_1)                            │
+│   ├─ [Step 2/3] OrchestratorC → CriticAgent (零工具)              │
+│   │          ↓ 找 bug 列表 (finalAnswer_2)                          │
+│   └─ [Step 3/3] OrchestratorE → EditorAgent (read/write/edit)     │
+│              ↓ 改代码 (finalAnswer_3)                              │
+│   ↓                                                                │
+│  ReviewResult(researcherSummary, criticBugs, editorChanges, ...)  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### 3 Agent 角色分工表 / 3-Agent Role Matrix
+
+| Agent | 工具 | 角色 | 严防 | maxSteps | maxCost |
+|---|---|---|---|---|---|
+| **Researcher** | read_file / grep / exec | 收集事实 | 写文件 / 跑修改性命令 / 给建议 | 8 | $0.20 |
+| **Critic** | (零) | 找 bug | 试图调工具 / 读文件 / 编造路径 | 5 | $0.10 |
+| **Editor** | read_file / write_file / edit_file | 修 bug | 重构 / 改架构 / 加功能 / 删测试 | 10 | $0.30 |
+
+### EditFile 工具核心 / EditFile Tool Core
+
+`old_string` + `new_string` 精确替换,**3 重防护**:
+1. **路径白名单** — `workDir.resolve(raw).normalize()` + `startsWith(workDir)` 检查(跟 WriteFile 同款,Day 3 pitfall #6)
+2. **出现次数严格** — 0 次 fail (找不到),>1 次 fail (除非 `replace_all=true`)
+3. **大小上限 1MB** — 防 OOM
+
+返回格式:`edited <path> (N occurrence[s][, all replaced])`
+
+### 3 测试矩阵 / 3 Test Matrix
+
+| 端 | 类型 | 数量 | 文件 |
+|---|---|---|---|
+| Java | 单元 (EditFile) | 6 | `src/test/java/.../tools/EditFileTest.java` |
+| Java | 端到端 (3 Agent E2E) | 3 | `src/test/java/.../agents/CodeReviewTest.java` |
+| **合计** | — | **9** | 单元 56 + 端到端 3 + 单元 MCP 14 = 73 测试 (62 Java 跑 + 3 skipped E2E 等 API key) |
+
+### Day 10 三大预知坑 / 3 Real Bugs Day 10 Hit
+
+#### 坑 #1: WorkerAgent.systemPrompt() 是 private
+
+- **症状**:Researcher/Critic/Editor 想 override systemPrompt,编译报 "cannot override because systemPrompt() is private"
+- **根因**:Day 8 写 WorkerAgent 时 systemPrompt 沿用 Agent.java 的 `private`
+- **修法**:`Agent.java:289` 改 `private String systemPrompt()` → `protected String systemPrompt()` (最小侵入)
+- **影响面**:Day 1-9 都没有子类 override systemPrompt,改 protected 不破坏现有用法
+
+#### 坑 #2: CriticAgent 零工具时 LLM 仍然想调工具
+
+- **症状**:跑 CriticAgent,LLM 收到空工具列表,但仍然生成 `tool_calls` (而不是纯文本响应)
+- **根因**:多数 LLM 在 system prompt 不严防时会"自作主张"
+- **修法**:`CriticAgent.systemPrompt()` 显式说"你没有工具",并加 "❌ 试图调用任何工具"禁令
+- **效果**:实测 `test_critic_no_tool_call` 通过,Critic 直接出 Markdown bug 列表
+
+#### 坑 #3: Orchestrator 1 个对 N worker 时 task 路由错
+
+- **症状**:`new Orchestrator(researcher, critic, editor)` 时,派 Researcher 的 task 可能被 critic 抢走
+- **根因**:Day 8 Orchestrator 是"任一 worker 抢 inbox 消息"模型,1 task 不指定 worker
+- **修法**:`CodeReviewOrchestrator` 用 **3 个独立 Orchestrator** (`orchR` / `orchC` / `orchE`),每个管 1 个 worker,task 100% 路由对
+- **trade-off**:3 个 worker 线程 (vs Day 8 的 1 个 pool),但 code review 流程串行不需要并发
+
+### Day 10 验收清单 / Day 10 Acceptance
+- [x] `ResearcherAgent` (只读, 3 工具, 严防写)
+- [x] `CriticAgent` (零工具, 纯推理, 严防调工具)
+- [x] `EditorAgent` (3 工具, 修 bug 不重构)
+- [x] `CodeReviewOrchestrator` (3 步串行流水线, 3 个独立 Orchestrator)
+- [x] `EditFile` 工具 (old_string/new_string 精确替换, 3 重防护)
+- [x] `EditFileTest` 6 单元 + `CodeReviewTest` 3 端到端
+- [x] `Agent.systemPrompt()` private → protected (允许子类 override)
+- [x] 62 Java 单元 + 3 端到端 (3 skipped E2E 等 API key)
+- [x] README Day 10 完整章节 (本文)
+
 ## 配置 LLM Provider / Configuring LLM Providers
 
 默认走 **OpenAI**。要切到别的厂商,改环境变量即可:
@@ -858,7 +947,8 @@ export LLM_MODEL="deepseek-chat"
 | 6 | 2026-06-10 | ✅ + GitHub Actions 拆 2 job + demo-script.sh + 修 TC-12 断言 + 修 .gitignore 行内注释 bug | 52 测试全过 (有 flake),CI 跑 ~3 分钟, 烧 ~$0.0043, 推 day6 + merge main |
 | 7 | 2026-06-10 | ✅ + 60s demo.gif + runbook.md + README Day 6/7 完整章节 + CI badge | 52 测试全过, 推 day7 + merge main, Project 1 完工 |
 | **8** | **2026-06-11** | **✅ + Orchestrator + WorkerAgent + Message (sealed) + 3 multi-agent flag + LlmClient 429 retry** | **57 测试 (34 单元 + 23 端到端) 全过, mvn test ~2 分钟, 烧 ~$0.012 (LlmClient retry 救了 7/8 AgentTest 撞 429), 已 push + merge 到 main** |
-| **9** | **2026-06-14** | **✅ + McpToolAdapter + McpServerMain (自实现 MCP 协议子集) + mcp-client/ (Python stdlib 0 依赖)** | **67 测试 (60 Java + 7 Python 跨语言) 全过, Python → Java 链路验证 (read 37469 字符 / write 文件读回一致 / get_current_time ISO 8601), 修 Day 8 进度日志 mismatch, 推 day9 + merge main** |
+| **9** | **2026-06-14** | **✅ + McpToolAdapter + McpServerMain (自实现 MCP 协议子集) + mcp-client/ (Python stdlib 0 依赖)** | **67 测试 (60 Java + 7 Python 跨语言) 全过, Python → Java 链路验证 (read 37469 字符 / write 文件读回一致 / get_current_time ISO 8601), 修 Day 5/Day 8 进度日志 mismatch, 推 day9 + merge main** |
+| **10** | **2026-06-15** | **✅ + ResearcherAgent (只读) + CriticAgent (零工具纯推理) + EditorAgent (写入) + CodeReviewOrchestrator (3 步串行流水线) + EditFile 工具** | **62 Java 单元 + 3 端到端 (3 skipped 等 API key), 3 Agent 角色分工 (严防越权), 推 day10 + merge main** |
 
 ## 贡献 / Contributing
 
