@@ -286,7 +286,7 @@ public class Agent {
         }
     }
 
-    private String systemPrompt() {
+    protected String systemPrompt() {
         String toolList = tools.values().stream()
             .map(t -> "- " + t.name() + ": " + t.description())
             .collect(Collectors.joining("\n"));
