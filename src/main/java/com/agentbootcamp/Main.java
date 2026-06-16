@@ -84,6 +84,11 @@ public class Main implements Runnable {
         defaultValue = "60000")
     private long workerTimeoutMs;
 
+    @Option(names = {"-m", "--metrics"},
+        description = "Day 11: 输出 Prometheus 格式 metrics 到指定文件 (默认 'off' 不输出)/ Output Prometheus metrics to file (default 'off')",
+        defaultValue = "off")
+    private String metricsPath;
+
     public static void main(String[] args) {
         int rc = new CommandLine(new Main()).execute(args);
         System.exit(rc);
@@ -138,7 +143,8 @@ public class Main implements Runnable {
             : "disabled"));
 
         try (TraceWriter trace = new TraceWriter(tracePath)) {
-            Agent agent = new Agent(llm, tools, trace, maxSteps, maxCost, memory);
+            com.agentbootcamp.metrics.MetricsCollector metrics = new com.agentbootcamp.metrics.MetricsCollector();
+            Agent agent = new Agent(llm, tools, trace, maxSteps, maxCost, memory, metrics);
             RunResult result = agent.run(goal);
             System.out.println();
             System.out.println("=== Agent 回答 / Agent's answer ===");
@@ -147,6 +153,13 @@ public class Main implements Runnable {
             System.out.println("统计 / Stats: " + result.summary());
             if (!"off".equalsIgnoreCase(tracePath)) {
                 System.out.println("Trace:  " + Path.of(tracePath).toAbsolutePath());
+            }
+            // Day 11: 打印 metrics summary, 写 Prometheus text 到 --metrics 文件
+            System.out.println(com.agentbootcamp.metrics.MetricsReporter.printSummary(metrics));
+            if (!"off".equalsIgnoreCase(metricsPath)) {
+                Path mp = Path.of(metricsPath);
+                java.nio.file.Files.writeString(mp, metrics.scrape());
+                System.out.println("Metrics (Prometheus): " + mp.toAbsolutePath());
             }
         }
     }

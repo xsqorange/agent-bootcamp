@@ -1,5 +1,7 @@
 package com.agentbootcamp;
 
+import com.agentbootcamp.metrics.CostCalculator;
+import com.agentbootcamp.metrics.MetricsCollector;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -31,9 +33,20 @@ public class LlmClient {
 
     private final LlmConfig config;
     private final HttpClient http;
+    /** Day 11: 可选 metrics 收集器 (null = 不收集,跟 Day 4 MemoryManager 同款兼容模式) */
+    private final MetricsCollector metrics;
 
     public LlmClient(LlmConfig config) {
+        this(config, null);
+    }
+
+    /**
+     * Day 11: 注入 MetricsCollector (OpenTelemetry/Micrometer 风格).
+     * 传 null 等价于单参构造,向后兼容 Day 1-10 现有测试/调用方.
+     */
+    public LlmClient(LlmConfig config, MetricsCollector metrics) {
         this.config = config;
+        this.metrics = metrics;
         this.http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build();
@@ -47,6 +60,7 @@ public class LlmClient {
      * @return          模型响应(可能含 tool_calls) / model response (may include tool_calls)
      */
     public LlmResponse chat(List<Message> messages, List<Map<String, Object>> tools) throws Exception {
+        long startMs = System.currentTimeMillis();
         Map<String, Object> body = new HashMap<>();
         body.put("model", config.model());
         body.put("messages", messages);
@@ -107,7 +121,16 @@ public class LlmClient {
             throw new RuntimeException("LLM call failed: " + resp.statusCode() + " " + resp.body());
         }
 
-        return parseResponse(resp.body());
+        // Day 11: 累加 metrics (token + cost + duration)
+        long durationMs = System.currentTimeMillis() - startMs;
+        LlmResponse response = parseResponse(resp.body());
+        if (metrics != null && response.tokensIn() != null) {
+            long in = response.tokensIn();
+            long out = response.tokensOut() != null ? response.tokensOut() : 0;
+            double cost = CostCalculator.compute(config.model(), in, out);
+            metrics.recordLlmCall(config.model(), in, out, cost, durationMs);
+        }
+        return response;
     }
 
     /** 解析 OpenAI 响应 / parse OpenAI-format response */
