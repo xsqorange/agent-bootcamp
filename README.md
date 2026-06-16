@@ -865,6 +865,102 @@ set -a && source .env && set +a
 - [x] 62 Java 单元 + 3 端到端 (3 skipped E2E 等 API key)
 - [x] README Day 10 完整章节 (本文)
 
+## Day 11 架构 / Day 11 Architecture (可观测性 + 成本 / Observability + Cost)
+
+**Day 10 → Day 11 的本质变化**:`Agent` 跑过的"资源消耗"从"只记在 trace 里"升级到"**Micrometer 实时指标 + 成本 dashboard + Prometheus 导出**" — 6 类核心指标覆盖 token/cost/latency/tool/agent step,跑完自动打印报告 + 可写 Prometheus text。
+
+**关键变化 / Key changes**:
+- 📊 **Micrometer 1.12.5** (facade) + **Prometheus registry** (text format exporter)
+- 💰 **CostCalculator** — 7 厂商定价表 (gpt-4o-mini / gpt-4o / deepseek / qwen / minimax-m3 / ollama),按 model 自动算 USD
+- 🏷️ **6 核心指标** 全部按 tag 分 (model / tool / stop_reason)
+- 🖥️ **`-m/--metrics` flag** — 写 Prometheus text 到文件,任何 Prometheus / Grafana 都能 scrape
+- 📜 **`MetricsReporter.printSummary()`** — 跑完 agent 打印人类可读报告 (P95 latency / 各 tool 调用次数 / 各 stop_reason 步数)
+- ⚠️ **警报提示** — cost > $0.10 硬上限 / max latency > 5s 软上限,自动告警
+- 🔌 **向后兼容** — LlmClient 1 参构造 (无 metrics) 跟 Agent 5/6 参构造 (无 metrics) 保留,Day 1-10 现有测试/调用方无 break
+
+### 4 核心指标 / 4 Core Metrics
+
+| 指标 | 类型 | Tags | 警报阈值 |
+|---|---|---|---|
+| `llm_tokens_in_total` | Counter | `model=...` | 软上限 (按 model 算成本) |
+| `llm_tokens_out_total` | Counter | `model=...` | 软上限 (按 model 算成本) |
+| `llm_cost_usd` | Counter | `model=...` | **硬上限 $0.10/会话** |
+| `llm_call_duration_seconds` | Timer (P50/P95/P99/max) | `model=...` | **P95 > 5s 告警** |
+| `tool_calls_total` | Counter | `tool=get_current_time / read_file / ...` | — |
+| `agent_steps_total` | Counter | `stop_reason=FINAL_ANSWER/MAX_STEPS/COST_LIMIT/ERROR` | — |
+
+### 架构图 / Architecture
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Main.java (CLI) -m/--metrics path                            │
+│    ├─ new MetricsCollector()    ← 1 个 per run               │
+│    ├─ new LlmClient(config, metrics)    ← 注入 metrics       │
+│    ├─ new Agent(tools, ..., metrics)                         │
+│    │                                                              │
+│    │ run() 循环每步:                                              │
+│    │   1. LlmClient.chat()                                    │
+│    │      → 调 LLM → 累加 llm_tokens_/cost/duration{model}  │
+│    │   2. executeOneTool(tool)                                 │
+│    │      → tool.execute() → 累加 tool_calls_total{tool=...} │
+│    │   3. Agent 末尾                                            │
+│    │      → 累加 agent_steps_total{stop_reason=...}           │
+│    │                                                              │
+│    └─ 跑完:                                                      │
+│        ├─ System.out.println(MetricsReporter.printSummary())  │
+│        └─ Files.writeString(path, metrics.scrape()) ← Prometheus text │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### `--metrics` flag 用法 / Usage
+
+```bash
+# 默认 (off):只打印人类可读 summary,不写文件
+./mvnw -q exec:java -Dexec.mainClass="com.agentbootcamp.Main" \
+  -Dexec.args="--goal '用 get_current_time 拿时间,然后说 done' -m off"
+
+# 输出 Prometheus 格式到文件 (Grafana/Prometheus 可直接 scrape)
+./mvnw -q exec:java -Dexec.mainClass="com.agentbootcamp.Main" \
+  -Dexec.args="--goal '...查询任务...' -m target/metrics.prom"
+
+# 输出示例 (Prometheus text format) / Example Prometheus output:
+# llm_tokens_in_total{model="minimax-m3",} 1234.0
+# llm_tokens_out_total{model="minimax-m3",} 567.0
+# llm_cost_usd{model="minimax-m3",} 0.0002
+# llm_call_duration_seconds_count{model="minimax-m3",} 3.0
+# llm_call_duration_seconds{quantile="0.95",model="minimax-m3",} 1.5
+# tool_calls_total{tool="read_file",} 2.0
+# agent_steps_total{stop_reason="FINAL_ANSWER",} 1.0
+```
+
+### MetricsReporter 输出示例 / Reporter Output Example
+
+```
+=== Day 11 Metrics Report ===
+LLM calls: 3 (in=600 tokens, out=300 tokens, cost=$0.000600)
+LLM latency: P50=1200ms, P95=2500ms, P99=2500ms, max=2500ms
+Tool calls: read_file=3, write_file=1
+Agent steps: FINAL_ANSWER=1
+```
+
+### Day 11 三大预知坑 / 3 Real Bugs Day 11 Hit
+
+1. **Micrometer 1.13.0 改包名** `io.micrometer.prometheus` → `io.micrometer.prometheusmetrics`,1.12.5 走老 API 稳
+2. **XML 注释禁止 `--`** (e.g. `--metrics flag`) → 改 `用于 -metrics flag` (em dash 不行,single dash OK)
+3. **Prometheus 1.12.5 scrape 对同名 metric (有/无 tag) dedup hide tagged** → recordLlmCall 只累加 tagged,untagged total 改用 scrape 端 SUM 聚合
+4. **`baseUnit("USD")` 把 counter name 加 `_USD_total` 后缀** → 改 counter name 为 `llm_cost_usd` (不带 `_total`)
+
+### Day 11 验收清单 / Day 11 Acceptance
+- [x] `pom.xml` 加 `micrometer.version=1.12.5` + `micrometer-core` + `micrometer-registry-prometheus`
+- [x] `MetricsCollector` 6 核心 metric + Prometheus text export
+- [x] `CostCalculator` 7 厂商定价 (gpt-4o-mini / gpt-4o / deepseek / qwen / minimax-m3 / ollama)
+- [x] `LlmClient` 2 参构造 (向后兼容 1 参) + chat() 累加 metrics
+- [x] `Agent` 7 参构造 (向后兼容 5/6 参) + run() 累加 agent_steps + executeOneTool 累加 tool_calls
+- [x] `MetricsReporter` 6 类指标汇总 + P95 latency + 警报
+- [x] `Main` 加 `-m/--metrics` flag,跑完打印 summary + 写 Prometheus text
+- [x] 68 单元测试全过 (9 Day 11 + 59 现有无回归)
+- [x] README Day 11 完整章节 (本文) + 进度日志 Day 11 行
+
 ## 配置 LLM Provider / Configuring LLM Providers
 
 默认走 **OpenAI**。要切到别的厂商,改环境变量即可:
