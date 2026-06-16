@@ -31,7 +31,7 @@
 | 11 | 可观测性 / Observability | OpenTelemetry + 成本统计 / cost tracking | ⏳ |
 | 12 | 安全 + 可靠性 / Safety + reliability | Resilience4j + prompt injection 防护 | ⏳ |
 | 13 | 部署 / Deploy | Docker + K8s + 健康检查 / health check | ⏳ |
-| 14 | 收尾发布 / Polish & ship | 双语博客 + demo + Release / bilingual blog + demo + release |
+| 14 | 收尾发布 / Polish & ship | 双语博客 + demo + Release / bilingual blog + demo + release | ⏳ |
 
 
 ## 快速开始 / Quick Start
@@ -907,12 +907,17 @@ export LLM_MODEL="deepseek-chat"
 
 ## 常见坑 / Pitfalls
 
-### Day 1-2 必看
-1. **Java 17 没在 PATH** — 装 JDK 后加到 PATH,或用 IDE 内置
-2. **API key 没设** — `export OPENAI_API_KEY=***` 或用 `.env` 加载
+### Day 1-2 必看 / Day 1-2 Must-Know
+1. **Java 17 没在 PATH** — 装 JDK 后加到 PATH，或用 IDE 内置
+   *English: Java 17 not in PATH — install JDK and add to PATH, or use IDE's bundled JDK*
+2. **API key 没设** — `export OPENAI_API_KEY=*** 或用 `.env` 加载
+   *English: API key not set — `export OPENAI_API_KEY=***` or load via `.env`*
 3. **网络问题** — 国内用 DeepSeek/通义比 OpenAI 快
+   *English: Network issues — in China, DeepSeek/Qwen are faster than OpenAI*
 4. **Maven 下载慢** — 配 `~/.m2/settings.xml` 用阿里云镜像
+   *English: Maven slow download — configure `~/.m2/settings.xml` with Aliyun mirror*
 5. **忘了 `mvn compile`** — 跑之前先编译
+   *English: Forgot `mvn compile` — always compile before running*
 
 ### Day 3 必看 / Day 3 Must-Know
 6. **相对路径解析错** — `Paths.get("foo.txt").toAbsolutePath()` 解析到 **JVM 的 `user.dir`**,不是 tool 构造时传的 `workDir`!正确做法:`workDir.resolve(relativePath)`,绝对路径才直接用 `Paths.get()`。**这个 bug 在用 `@TempDir` 单测时才暴露**,生产碰巧 work 是因为 Main 默认 workDir = cwd。
