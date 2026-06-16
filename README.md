@@ -116,6 +116,7 @@ LLM API (OpenAI/DeepSeek/Qwen/Ollama)
 ## Day 2 架构 / Day 2 Architecture (ReAct 循环)
 
 **Day 1 → Day 2 的本质变化**:`Agent.runOnce()` 单次调用 → `Agent.run()` 完整 while 循环。
+*The key shift Day 1 → Day 2: `Agent.runOnce()` (single call) → `Agent.run()` (full `while` loop with stop reasons).*
 
 ```
    ┌──────────────────────────────────────────────────┐
@@ -546,7 +547,7 @@ cat evals/reports/01-write-file-creates.jsonl | head -5 | python3 -m json.tool
 - 📜 **README Day 6/7 完整章节**(本文)
 - ⚠️ **asciinema Windows 不支持** (缺 `fcntl` 模块) → 转用 ScreenToGif / ffmpeg gdigrab 录
 
-### Demo
+### Demo / 演示
 
 ![60s demo](./docs/demo.gif)
 
