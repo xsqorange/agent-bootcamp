@@ -914,46 +914,69 @@ export LLM_MODEL="deepseek-chat"
 4. **Maven 下载慢** — 配 `~/.m2/settings.xml` 用阿里云镜像
 5. **忘了 `mvn compile`** — 跑之前先编译
 
-### Day 3 必看
+### Day 3 必看 / Day 3 Must-Know
 6. **相对路径解析错** — `Paths.get("foo.txt").toAbsolutePath()` 解析到 **JVM 的 `user.dir`**,不是 tool 构造时传的 `workDir`!正确做法:`workDir.resolve(relativePath)`,绝对路径才直接用 `Paths.get()`。**这个 bug 在用 `@TempDir` 单测时才暴露**,生产碰巧 work 是因为 Main 默认 workDir = cwd。
+   *English: `Paths.get(rel).toAbsolutePath()` resolves to **JVM's `user.dir`**, not the `workDir` passed to the tool! Use `workDir.resolve(relativePath)` for relative, `Paths.get()` only for absolute. The bug only surfaces with `@TempDir` unit tests; prod works by accident because Main defaults workDir=cwd.*
 7. **MAX_STEPS / COST_LIMIT 时 trace 缺 stopReason** — `break` 之前要再写一次 `writeTrace()`,或循环结束后写一行 summary。修法见 Day 3 章节 "Bug A"。
+   *English: When breaking on MAX_STEPS / COST_LIMIT, the trace misses the final `stopReason`. Write a summary line before `break` or after the loop. See "Bug A" in Day 3 chapter.*
 8. **`LlmConfig` 不认你的 API key 命名** — 默认认 `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` / `DASHSCOPE_API_KEY` / `ANTHROPIC_API_KEY`,其他名字要么自己加要么塞到 `OPENAI_API_KEY` slot。Day 3 加了 `MINIMAX_API_KEY`。
+   *English: `LlmConfig` only recognizes 4 key names by default. Others need to be added or aliased to `OPENAI_API_KEY`. Day 3 added `MINIMAX_API_KEY` support.*
 9. **LLM 返回了 Chain of Thought (`<think>...`)** — 一些模型(MiniMax m3)会把思考过程塞在 content 里,**导致 token 消耗翻倍**!要算成本时记得减掉。
+   *English: Some models (e.g. MiniMax m3) include CoT (`<think>...`) in the `content`, **doubling token usage**. Subtract it from cost calculations.*
 10. **并行工具调用的"假象"** — `multi_tool_use.parallel` 不是模型**故意**并行,是 OpenAI 协议允许 1 个 assistant message 带 N 个 tool_calls,我们用 for 循环依次执行。要"真并行"得用 `ExecutorService` 调 N 个工具(Day 8+ 再优化)。
+    *English: `multi_tool_use.parallel` is not "deliberate" parallelism — the OpenAI protocol just allows N tool_calls in one assistant message, and we execute them serially in a for-loop. True parallelism needs `ExecutorService` (Day 8+).*
 
-### Day 4 必看
+### Day 4 必看 / Day 4 Must-Know
 11. **滑动窗口的"丢中间" vs "总结中间"** — Day 4 选总结中间(更保真),但**总结本身有 token 成本**(又要调 LLM)。高吞吐场景下考虑用规则截断(`truncate(messages, keepLastN=8)` 拿掉老内容)省 token。
+    *English: "Drop middle" vs "summarize middle" — Day 4 chose summarize (more faithful), but the summary itself costs tokens (one more LLM call). High-throughput scenarios: use rule-based truncation (`truncate(messages, keepLastN=8)`) to drop old messages and save tokens.*
 12. **MemoryManager 永远保留 system + first user** — 这两个是"骨架",system 是工具 schema + 角色,first user 是用户最初目标。任何压缩策略都不能动它们,否则 LLM 会"失忆"或"不知道自己是谁"。
+    *English: MemoryManager always preserves system + first user. These are the "skeleton": system defines tools + role, first user is the original goal. Any compression strategy must leave them untouched, or the LLM will "forget" who it is / what to do.*
 13. **RAG 不引 embedding 的代价** — Day 4 用 keyword TF,优点:无外部依赖、零成本、快;缺点:同义词("工具" vs "tool")、多语言、词形变化都搜不到。Day 8+ 上 embedding 升级。
+    *English: Cost of skipping embeddings — Day 4 uses keyword TF (no external deps, zero cost, fast), but can't match synonyms, multilingual, or morphological variants. Upgrade to embeddings Day 8+.*
 14. **chunk 切分按段 vs 按字符** — 按段(双换行)优先,语义最干净;但**单段超长会被滑窗切碎**,可能把"概念 A 的描述"和"概念 B 的描述"切到同一个 chunk,搜"概念 A"时会带出概念 B 的内容。
+    *English: Chunk by paragraph vs by char — prefer paragraph (double newline) for clean semantics; but a single long paragraph gets split by sliding window, possibly mixing "concept A" with "concept B" in the same chunk, polluting search results.*
 15. **`@TempDir` 又救了一命** — 跟 Day 3 `Paths.get` bug 一样,生产能跑 ≠ 测试能过。Day 4 的 `RagIndexTest.testNullDir()` / `testSearchEmptyQuery()` / `testCompressFallbackOnLlmError` 这类边界 case,**真 API + 真人手测都难暴露**,只有单元测试能抓。
+    *English: `@TempDir` saves the day again — same as Day 3 `Paths.get` bug, prod running ≠ test passing. Day 4's `RagIndexTest.testNullDir()` / `testSearchEmptyQuery()` / `testCompressFallbackOnLlmError` boundary cases are hard to catch with real APIs + manual testing; unit tests are the only way.*
 16. **`Agent` 5 参构造器保留是给 Day 1-3 测试用** — 加 memory 是破坏性变更,但通过 5 参 delegate 到 6 参(`memory=null`),**Day 1-3 的 15 个测试一行不用改**。这是"加 feature 不 break 现有用户"的教科书姿势。
+    *English: The 5-arg `Agent` constructor is kept for Day 1-3 tests. Adding memory was a breaking change, but by delegating the 5-arg to 6-arg (with `memory=null`), **Day 1-3's 15 tests didn't need a single line changed**. Textbook "add feature without breaking existing users".*
 
-### Day 5 必看
+### Day 5 必看 / Day 5 Must-Know
 17. **`-parameters` 编译选项必加** — 写一个反序列化 record 的代码(比如从 JSON 读 EvalCase)才会踩到。没它 record 组件名变 `arg0/arg1`,Jackson 反射找不到字段。**Day 1-4 没踩因为都是构造/序列化 record**。修法:`maven-compiler-plugin` 加 `<parameters>true</parameters>`。
+    *English: The `-parameters` compiler flag is mandatory — it only bites when you deserialize a record (e.g. reading EvalCase from JSON). Without it, record component names become `arg0/arg1` and Jackson reflection fails. Day 1-4 didn't hit this because all records were constructed/serialized. Fix: add `<parameters>true</parameters>` to `maven-compiler-plugin`.*
 18. **JSON 命名策略要显式配** — Jackson 默认不做 snake_case ↔ camelCase 转换。JSON 写 `must_call_tools` 就要在 `ObjectMapper` 配 `PropertyNamingStrategies.SNAKE_CASE`,否则 record 组件全 null。
+    *English: Configure JSON naming strategy explicitly. Jackson doesn't convert snake_case ↔ camelCase by default. JSON `must_call_tools` needs `PropertyNamingStrategies.SNAKE_CASE` on `ObjectMapper`, otherwise record components are all null.*
 19. **LLM API 429 是日常不是例外** — 跑评测一定要在 harness 里加 retry-with-backoff。Day 5 经验:`mvn verify` 跑 10+ 个真 LLM case 必撞 429,没 retry 评测天天飘。
+    *English: LLM API 429 is daily, not exceptional — eval harnesses must add retry-with-backoff. Day 5 experience: `mvn verify` with 10+ real LLM cases will always hit 429, no retry means flaky evals every day.*
 20. **断言别假设 LLM 答案格式** — 模型说 "WriteFile" / "`write_file`" / "write_file" 都对(语义一致),但断言要 case-insensitive + 不假设具体大小写格式,否则每次 run 都可能飘。
+    *English: Don't assume LLM answer format in assertions — "WriteFile" / "`write_file`" / "write_file" are all semantically correct. Assertions must be case-insensitive + format-agnostic, or every run may flake.*
 21. **`@TestFactory` 动态测试是 harness 标配** — 比 10 个 `@Test` 方法清爽一万倍,`List<EvalCase>` 加新 case 不用动 Java 代码。`mvn verify` 自动跑新 case,`mvn -Dtest=EvalRunnerTest` 也能全跑。
+    *English: `@TestFactory` dynamic tests are the harness standard — orders of magnitude cleaner than 10 `@Test` methods. Adding a new case to `List<EvalCase>` doesn't touch Java code. `mvn verify` auto-runs new cases; `mvn -Dtest=EvalRunnerTest` runs them all too.*
 22. **eval reports 一定要 gitignore** — `evals/reports/<id>.jsonl` 跟普通 trace 一样可能含 prompt 数据,绝不入库。`.gitignore` 加 `evals/reports/` 一劳永逸。
+    *English: Always gitignore eval reports — `evals/reports/<id>.jsonl` may contain prompt data just like regular trace, must never enter git. Adding `evals/reports/` to `.gitignore` solves it once.*
 
-### Day 8 必看
+### Day 8 必看 / Day 8 Must-Know
 23. **`sealed interface` + `record` 是多 Agent 消息协议的最佳拍档** — `sealed` 强制子类可枚举,`record` 自动 `equals/hashCode/toString` + JSON 友好。Day 9+ 上 MCP 互通时,`Message.Task` 直接 Jackson 序列化就能跨语言传。
+    *English: `sealed interface` + `record` is the best combo for multi-agent message protocols — `sealed` forces enumerated subclasses, `record` auto-generates `equals/hashCode/toString` + Jackson-friendly. For Day 9+ MCP interop, `Message.Task` serializes directly via Jackson for cross-language transport.*
 24. **CSP 模式 > 共享 state** — Orchestrator 跟 Worker 用 2 个独立 `BlockingQueue` (inbox + outbox) 通信,而不是共享 1 个 `List<Message>`。**避免 race condition + 不用 lock**。代价是要用 `correlationId` 配对 N 个 task/result。
+    *English: CSP pattern > shared state — Orchestrator and Worker communicate via 2 independent `BlockingQueue`s (inbox + outbox), not a shared `List<Message>`. **No race conditions, no locks**. Cost: need `correlationId` to pair N tasks/results.*
 25. **`WorkerAgent extends Agent` 是合理继承** — 违反"composition over inheritance"但这里合适:Worker 就是要复用 Agent 的 ReAct 循环、工具、成本估算,跟 Agent 是"is-a"关系。Day 10+ 改 N 个 worker 角色(Researcher/Critic/Editor)时再考虑改成 interface。
+    *English: `WorkerAgent extends Agent` is justified inheritance — technically violates "composition over inheritance", but Worker genuinely is-an Agent (reuses ReAct loop, tools, cost estimation). Day 10+ for N worker roles (Researcher/Critic/Editor), reconsider as interface.*
 26. **`runLoop` 用 `poll(100ms)` 不用 `take()`** — `take()` 永久阻塞,worker 收不到 shutdown 信号就僵死;`poll(100ms)` 周期性 check `running` 标志,优雅退出。**这是多线程代码最基本的"礼让"姿势**。
+    *English: `runLoop` uses `poll(100ms)`, not `take()` — `take()` blocks forever, worker can't receive shutdown signal and dies; `poll(100ms)` periodically checks the `running` flag for graceful exit. **Basic "courtesy" in multi-threaded code**.*
 27. **LlmClient retry 要通用不要只给 harness** — Day 5 我把 retry 放在 EvalHarness (scope 小),Day 8 撞了 AgentTest 7/8 挂的 429,**必须升级到 LlmClient 层**。Lesson:通用 infra 层的保护(网络/限流) > 业务层(harness)的保护,前者覆盖所有调用者。
+    *English: LlmClient retry must be generic, not harness-only — Day 5 put retry in EvalHarness (narrow scope); Day 8 hit AgentTest 7/8 with 429s. **Must upgrade to LlmClient layer**. Lesson: generic infra-layer protection (network/rate-limit) > business-layer (harness), the former covers all callers.*
 28. **`@TempDir` 不救 multi-agent 测试** — 跟 Day 3 `Paths.get` bug 类似,生产能跑 ≠ 单元测试能验。Day 8 1 orchestrator + 1 worker 的端到端测没写(代码 0 行 E2E),只写了 `MessageTest` 5 个纯 record 测。**多 Agent 真实行为验证靠 demo 跑,CI 不跑**。
+    *English: `@TempDir` doesn't save multi-agent tests — similar to Day 3 `Paths.get` bug, prod running ≠ unit-test verifiable. Day 8's 1-orchestrator + 1-worker E2E wasn't written (0 lines E2E code); only 5 pure-record `MessageTest` cases. **Multi-agent real-behavior verification relies on demo runs, not CI**.*
 
 ## 进度记录 / Progress Log
 
 | Day | 日期 / Date | 完成情况 / Status | 笔记 / Notes |
 |---|---|---|---|
-| 1 | 2026-06-05 | ✅ 项目骨架 + LlmClient + 3 tools | 推到 GitHub: `xsqorange/agent-bootcamp` |
-| 2 | 2026-06-06 | ✅ ReAct 循环 + StopReason + JSONL trace | 5 个黄金测试用例待跑通 |
-| 3 | 2026-06-07 | ✅ + 2 工具 (write_file, grep) + 10 黄金用例 + 修 2 个 Day 2 bug | 15 个测试 (10 单元 + 5 端到端) 全过 |
-| 4 | 2026-06-08 | ✅ + MemoryManager + RagIndex + search_kb (6 工具) + 5 知识库 .md | 42 个测试 (24 单元 + 8 端到端) 全过, 编译 0 warning, 已 push + merge 到 main |
-| 5 | 2026-06-09 | ✅ + EvalHarness + 10 黄金用例 JSON + JUnit 动态测试 + 429 retry | 52 个测试 (32 单元 + 20 端到端) 全过, mvn verify ~3 分钟, 烧 $0.0081, 已 push + merge 到 main |
+| 1 | 2026-06-05 | ✅ 项目骨架 + LlmClient + 3 tools / Project skeleton + LlmClient + 3 tools | 推到 GitHub: `xsqorange/agent-bootcamp` / Push to GitHub: `xsqorange/agent-bootcamp` |
+| 2 | 2026-06-06 | ✅ ReAct 循环 + StopReason + JSONL trace / ReAct loop + StopReason + JSONL trace | 5 个黄金测试用例待跑通 / 5 golden test cases pending |
+| 3 | 2026-06-07 | ✅ + 2 工具 (write_file, grep) + 10 黄金用例 + 修 2 个 Day 2 bug / + 2 tools (write_file, grep) + 10 golden cases + fix 2 Day 2 bugs | 15 个测试 (10 单元 + 5 端到端) 全过 / 15 tests (10 unit + 5 E2E) all pass |
+| 4 | 2026-06-08 | ✅ + MemoryManager + RagIndex + search_kb (6 工具) + 5 知识库 .md / + MemoryManager + RagIndex + search_kb (6 tools) + 5 knowledge .md files | 42 个测试 (24 单元 + 8 端到端) 全过, 编译 0 warning, 已 push + merge 到 main / 42 tests (24 unit + 8 E2E) all pass, 0 compile warning, push + merge to main |
+| 5 | 2026-06-09 | ✅ + EvalHarness + 10 黄金用例 JSON + JUnit 动态测试 + 429 retry / + EvalHarness + 10 golden cases JSON + JUnit dynamic tests + 429 retry | 52 个测试 (32 单元 + 20 端到端) 全过, mvn verify ~3 分钟, 烧 $0.0081, 已 push + merge 到 main / 52 tests (32 unit + 20 E2E) all pass, mvn verify ~3 min, $0.0081 cost, push + merge to main |
 | 6 | 2026-06-10 | ✅ + GitHub Actions 拆 2 job + demo-script.sh + 修 TC-12 断言 + 修 .gitignore 行内注释 bug / GitHub Actions 2-job split + demo script + TC-12 assertion fix + .gitignore inline-comment bug fix | 52 测试全过 (有 flake),CI 跑 ~3 分钟, 烧 ~$0.0043, 推 day6 + merge main / 52 tests pass (flake known), CI ~3 min, $0.0043, push day6 + merge main |
 | 7 | 2026-06-10 | ✅ + 60s demo.gif + runbook.md + README Day 6/7 完整章节 + CI badge / 60s demo.gif + runbook + README Day 6/7 chapters + CI badge | 52 测试全过, 推 day7 + merge main, Project 1 完工 / 52 tests pass, push day7 + merge main, **Project 1 完工 / done** |
 | **8** | **2026-06-11** | **✅ + Orchestrator + WorkerAgent + Message (sealed) + 3 multi-agent flag + LlmClient 429 retry** | **57 测试 (34 单元 + 23 端到端) 全过, mvn test ~2 分钟, 烧 ~$0.012 (LlmClient retry 救了 7/8 AgentTest 撞 429), 已 push + merge 到 main / 57 tests (34 unit + 23 E2E) pass, mvn test ~2 min, $0.012 (retry saved 7/8 AgentTest 429s), push + merge to main** |
