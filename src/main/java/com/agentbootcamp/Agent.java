@@ -37,10 +37,11 @@ public class Agent {
 
     private final LlmClient llm;
     private final Map<String, Tool> tools;
-    private final TraceWriter trace;       // 可为 null
+    private final TraceWriter trace;        // Day 2
     private final int maxSteps;
     private final double maxCostUsd;
-    private final MemoryManager memory;    // Day 4 新增, 可为 null
+    private final MemoryManager memory;     // Day 4
+    private final com.agentbootcamp.metrics.MetricsCollector metrics;  // Day 11
 
     /**
      * 便捷构造器(5 参) — 不带 memory / Convenience constructor (5-param) — no memory.
@@ -48,25 +49,35 @@ public class Agent {
      */
     public Agent(LlmClient llm, List<Tool> tools, TraceWriter trace,
                  int maxSteps, double maxCostUsd) {
-        this(llm, tools, trace, maxSteps, maxCostUsd, null);
+        this(llm, tools, trace, maxSteps, maxCostUsd, null, null);
     }
 
     /**
-     * 完整构造器(6 参)— Day 4 / Full constructor (6-param) — Day 4.
-     *
-     * @param memory MemoryManager 实例, null = 不压缩
+     * Day 4: 加 memory (向后兼容,5 参 delegate 到 6 参).
      */
     public Agent(LlmClient llm, List<Tool> tools, TraceWriter trace,
                  int maxSteps, double maxCostUsd, MemoryManager memory) {
+        this(llm, tools, trace, maxSteps, maxCostUsd, memory, null);
+    }
+
+    /**
+     * Day 11: 加 MetricsCollector (向后兼容,6 参 delegate 到 7 参 metrics=null).
+     * @param metrics 累加 tool/agent step metrics,null = 不收集
+     */
+    public Agent(LlmClient llm, List<Tool> tools, TraceWriter trace,
+                 int maxSteps, double maxCostUsd, MemoryManager memory,
+                 com.agentbootcamp.metrics.MetricsCollector metrics) {
         this.llm = llm;
         this.tools = tools.stream().collect(Collectors.toMap(Tool::name, t -> t));
         this.trace = trace;
         this.maxSteps = maxSteps;
         this.maxCostUsd = maxCostUsd;
         this.memory = memory;
-        log.info("Agent 初始化: tools={}, maxSteps={}, maxCost=${}, memory={}",
+        this.metrics = metrics;
+        log.info("Agent 初始化: tools={}, maxSteps={}, maxCost=${}, memory={}, metrics={}",
             this.tools.keySet(), maxSteps, maxCostUsd,
-            memory != null ? "enabled" : "disabled");
+            memory != null ? "enabled" : "disabled",
+            metrics != null ? "enabled" : "disabled");
     }
 
     /**
@@ -178,6 +189,8 @@ public class Agent {
         RunResult result = new RunResult(finalAnswer, stopReason, step,
             totalTokensIn, totalTokensOut, totalCostUsd);
         log.info("=== Done: {} ===", result.summary());
+        // Day 11: 累加 agent step metric (按 stopReason 分 tag)
+        if (metrics != null) metrics.recordAgentStep(stopReason.name());
         return result;
     }
 
@@ -213,6 +226,8 @@ public class Agent {
         try {
             String result = tool.execute(args);
             long dur = (System.nanoTime() - start) / 1_000_000;
+            // Day 11: 累加 tool call metric (按 tool name 分 tag)
+            if (metrics != null) metrics.recordToolCall(tc.function().name());
             return new AgentStep.ToolExecutionRecord(
                 tc.id(), tc.function().name(), args, result, true, dur, null);
         } catch (Exception e) {
