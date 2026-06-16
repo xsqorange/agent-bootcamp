@@ -19,6 +19,8 @@
         <jackson.version>2.17.2</jackson.version>
         <slf4j.version>2.0.13</slf4j.version>
         <junit.version>5.10.3</junit.version>
+        <!-- Day 11: Micrometer metrics facade + Prometheus text format exporter -->
+        <micrometer.version>1.12.5</micrometer.version>
         <!-- Day 9: 不引入外部 MCP SDK (官方 Java SDK 2026-06 还是 Kotlin-only,见 README Day 9 章节"Day 9 预知坑 #1")
              自己实现 MCP 协议子集 (JSON-RPC 2.0 over stdio, 跟 Python mcp PyPI 包协议级兼容) -->
     </properties>
@@ -36,6 +38,19 @@
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
             <version>${jackson.version}</version>
+        </dependency>
+
+        <!-- Day 11: Micrometer metrics facade (counter / timer / gauge) -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+            <version>${micrometer.version}</version>
+        </dependency>
+        <dependency>
+            <!-- Day 11: Prometheus text format exporter (用于 -metrics flag 输出) -->
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+            <version>${micrometer.version}</version>
         </dependency>
 
         <!-- Logging / 日志 -->
