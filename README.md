@@ -26,11 +26,11 @@
 | 6 | CI + demo / CI + demo | 拆 2 job Actions + demo-script.sh + 修 TC-12 断言 | ✅ |
 | 7 | Project 1 收尾 / Project 1 wrap-up | 60s demo.gif + runbook + README + CI badge | ✅ |
 | **8** | **多 Agent 入门 / Multi-agent intro** | **Orchestrator + 1 Worker (`BlockingQueue` 消息协议)** | **✅** |
-| 9 | MCP 服务器 / MCP server | 跨语言工具互通 / cross-language tool interop |
-| 10 | 3-Agent 团队 / 3-agent crew | Researcher / Critic / Editor |
-| 11 | 可观测性 / Observability | OpenTelemetry + 成本统计 / cost tracking |
-| 12 | 安全 + 可靠性 / Safety + reliability | Resilience4j + prompt injection 防护 |
-| 13 | 部署 / Deploy | Docker + K8s + 健康检查 / health check |
+| 9 | MCP 服务器 / MCP server | 跨语言工具互通 / cross-language tool interop | ✅ |
+| 10 | 3-Agent 团队 / 3-agent crew | Researcher / Critic / Editor | ✅ |
+| 11 | 可观测性 / Observability | OpenTelemetry + 成本统计 / cost tracking | ⏳ |
+| 12 | 安全 + 可靠性 / Safety + reliability | Resilience4j + prompt injection 防护 | ⏳ |
+| 13 | 部署 / Deploy | Docker + K8s + 健康检查 / health check | ⏳ |
 | 14 | 收尾发布 / Polish & ship | 双语博客 + demo + Release / bilingual blog + demo + release |
 
 
@@ -888,12 +888,21 @@ export LLM_MODEL="deepseek-chat"
 
 ## 学习路径 / Learning Path
 
+**中文**:
 1. **本仓库**:`agent-bootcamp` — 14 天代码
 2. **跟着做**:
    - Day 1-2:读完本仓库的 `LlmClient.java` + `Agent.java` + 3 个 Tool
    - Day 3-5:加 `WriteFile.java` / `Grep.java`,加 JSONL trace
    - Day 6-7:写 README、加 5 个黄金评测用例、推 GitHub
    - Day 8+:看 `agent-dev-crash-course` Day 8-14 计划
+
+**English**:
+1. **This repo**: `agent-bootcamp` — 14 days of code
+2. **Follow along**:
+   - Day 1-2: read `LlmClient.java` + `Agent.java` + 3 Tool classes
+   - Day 3-5: add `WriteFile.java` / `Grep.java`, add JSONL trace
+   - Day 6-7: write README, add 5 golden eval cases, push to GitHub
+   - Day 8+: see `agent-dev-crash-course` Day 8-14 plan
 
 ## 常见坑 / Pitfalls
 
@@ -937,25 +946,30 @@ export LLM_MODEL="deepseek-chat"
 
 ## 进度记录 / Progress Log
 
-| Day | 日期 | 完成情况 | 笔记 |
+| Day | 日期 / Date | 完成情况 / Status | 笔记 / Notes |
 |---|---|---|---|
 | 1 | 2026-06-05 | ✅ 项目骨架 + LlmClient + 3 tools | 推到 GitHub: `xsqorange/agent-bootcamp` |
 | 2 | 2026-06-06 | ✅ ReAct 循环 + StopReason + JSONL trace | 5 个黄金测试用例待跑通 |
 | 3 | 2026-06-07 | ✅ + 2 工具 (write_file, grep) + 10 黄金用例 + 修 2 个 Day 2 bug | 15 个测试 (10 单元 + 5 端到端) 全过 |
 | 4 | 2026-06-08 | ✅ + MemoryManager + RagIndex + search_kb (6 工具) + 5 知识库 .md | 42 个测试 (24 单元 + 8 端到端) 全过, 编译 0 warning, 已 push + merge 到 main |
 | 5 | 2026-06-09 | ✅ + EvalHarness + 10 黄金用例 JSON + JUnit 动态测试 + 429 retry | 52 个测试 (32 单元 + 20 端到端) 全过, mvn verify ~3 分钟, 烧 $0.0081, 已 push + merge 到 main |
-| 6 | 2026-06-10 | ✅ + GitHub Actions 拆 2 job + demo-script.sh + 修 TC-12 断言 + 修 .gitignore 行内注释 bug | 52 测试全过 (有 flake),CI 跑 ~3 分钟, 烧 ~$0.0043, 推 day6 + merge main |
-| 7 | 2026-06-10 | ✅ + 60s demo.gif + runbook.md + README Day 6/7 完整章节 + CI badge | 52 测试全过, 推 day7 + merge main, Project 1 完工 |
-| **8** | **2026-06-11** | **✅ + Orchestrator + WorkerAgent + Message (sealed) + 3 multi-agent flag + LlmClient 429 retry** | **57 测试 (34 单元 + 23 端到端) 全过, mvn test ~2 分钟, 烧 ~$0.012 (LlmClient retry 救了 7/8 AgentTest 撞 429), 已 push + merge 到 main** |
-| **9** | **2026-06-14** | **✅ + McpToolAdapter + McpServerMain (自实现 MCP 协议子集) + mcp-client/ (Python stdlib 0 依赖)** | **67 测试 (60 Java + 7 Python 跨语言) 全过, Python → Java 链路验证 (read 37469 字符 / write 文件读回一致 / get_current_time ISO 8601), 修 Day 5/Day 8 进度日志 mismatch, 推 day9 + merge main** |
-| **10** | **2026-06-15** | **✅ + ResearcherAgent (只读) + CriticAgent (零工具纯推理) + EditorAgent (写入) + CodeReviewOrchestrator (3 步串行流水线) + EditFile 工具** | **62 Java 单元 + 3 端到端 (3 skipped 等 API key), 3 Agent 角色分工 (严防越权), 推 day10 + merge main** |
+| 6 | 2026-06-10 | ✅ + GitHub Actions 拆 2 job + demo-script.sh + 修 TC-12 断言 + 修 .gitignore 行内注释 bug / GitHub Actions 2-job split + demo script + TC-12 assertion fix + .gitignore inline-comment bug fix | 52 测试全过 (有 flake),CI 跑 ~3 分钟, 烧 ~$0.0043, 推 day6 + merge main / 52 tests pass (flake known), CI ~3 min, $0.0043, push day6 + merge main |
+| 7 | 2026-06-10 | ✅ + 60s demo.gif + runbook.md + README Day 6/7 完整章节 + CI badge / 60s demo.gif + runbook + README Day 6/7 chapters + CI badge | 52 测试全过, 推 day7 + merge main, Project 1 完工 / 52 tests pass, push day7 + merge main, **Project 1 完工 / done** |
+| **8** | **2026-06-11** | **✅ + Orchestrator + WorkerAgent + Message (sealed) + 3 multi-agent flag + LlmClient 429 retry** | **57 测试 (34 单元 + 23 端到端) 全过, mvn test ~2 分钟, 烧 ~$0.012 (LlmClient retry 救了 7/8 AgentTest 撞 429), 已 push + merge 到 main / 57 tests (34 unit + 23 E2E) pass, mvn test ~2 min, $0.012 (retry saved 7/8 AgentTest 429s), push + merge to main** |
+| **9** | **2026-06-14** | **✅ + McpToolAdapter + McpServerMain (自实现 MCP 协议子集) + mcp-client/ (Python stdlib 0 依赖) / McpToolAdapter + McpServerMain (self-implemented MCP protocol subset) + mcp-client/ (Python stdlib, 0 deps)** | **67 测试 (60 Java + 7 Python 跨语言) 全过, Python → Java 链路验证 (read 37469 字符 / write 文件读回一致 / get_current_time ISO 8601), 修 Day 5/Day 8 进度日志 mismatch, 推 day9 + merge main / 67 tests (60 Java + 7 Python cross-lang) pass, Python→Java link verified (read 37469 chars / write roundtrip / ISO 8601 time), Day 5/Day 8 progress log mismatch fixed, push day9 + merge main** |
+| **10** | **2026-06-15** | **✅ + ResearcherAgent (只读) + CriticAgent (零工具纯推理) + EditorAgent (写入) + CodeReviewOrchestrator (3 步串行流水线) + EditFile 工具 / ResearcherAgent (read-only) + CriticAgent (zero-tool pure reasoning) + EditorAgent (write) + CodeReviewOrchestrator (3-step serial pipeline) + EditFile tool** | **62 Java 单元 + 3 端到端 (3 skipped 等 API key), 3 Agent 角色分工 (严防越权), 推 day10 + merge main / 62 Java unit + 3 E2E (3 skipped pending API key), 3-Agent role separation (strict no-overreach), push day10 + merge main** |
 
 ## 贡献 / Contributing
 
-这是提供给有一定Java基础想面向Agent开发学习的项目,但欢迎:
+**中文**:**目标:提供给有一定 Java 基础想面向 Agent 开发学习的项目**,但欢迎:
 - Issue 提问 / questions
 - PR 修 typo / typo fixes
 - Star ⭐ 鼓励 / for encouragement
+
+**English**: **Goal: provide a project for Java engineers learning agent development.** Contributions welcome:
+- Issues / questions
+- PRs for typo fixes
+- Stars ⭐ for encouragement
 
 ## 许可证 / License
 
@@ -963,11 +977,20 @@ export LLM_MODEL="deepseek-chat"
 
 ## 作者 / Author
 
-**码力全开** — Java/Spring 工程师转 Agent 开发
+**中文**:**码力全开** — Java/Spring 工程师转 Agent 开发
+- GitHub: [@xsqorange](https://github.com/xsqorange)
+- Email: `maliquankai123@gmail.com`
+
+**English**: **码力全开 (Mǎlì Quánkāi)** — Java/Spring engineer transitioning to agent development
 - GitHub: [@xsqorange](https://github.com/xsqorange)
 - Email: `maliquankai123@gmail.com`
 
 ## 致谢 / Acknowledgments
 
+**中文**:
 - Hermes Agent — 编排这一切的 AI 助手
 - Anthropic / OpenAI / DeepSeek / Qwen / MiniMax — LLM 提供方
+
+**English**:
+- **Hermes Agent** — the AI assistant orchestrating all of this
+- **Anthropic / OpenAI / DeepSeek / Qwen / MiniMax** — LLM providers
