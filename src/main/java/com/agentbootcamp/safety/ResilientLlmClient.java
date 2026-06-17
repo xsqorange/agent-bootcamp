@@ -1,6 +1,7 @@
 package com.agentbootcamp.safety;
 
 import com.agentbootcamp.LlmClient;
+import com.agentbootcamp.LlmConfig;
 import com.agentbootcamp.Message;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
@@ -33,10 +34,10 @@ import java.util.function.Supplier;
  *
  * 用法 / Usage:
  *   LlmClient raw = new LlmClient(config);
- *   LlmClient resilient = new ResilientLlmClient(raw);
+ *   LlmClient resilient = new ResilientLlmClient(raw);  // 实际返回 LlmClient (向上转型)
  *   LlmResponse resp = resilient.chat(messages, tools);  // 自动 timeout + circuit breaker + retry
  */
-public class ResilientLlmClient {
+public class ResilientLlmClient extends LlmClient {
     private static final Logger log = LoggerFactory.getLogger(ResilientLlmClient.class);
 
     private final LlmClient delegate;
@@ -46,6 +47,8 @@ public class ResilientLlmClient {
     private final ScheduledExecutorService scheduler;
 
     public ResilientLlmClient(LlmClient delegate) {
+        // 调 LlmClient 单参构造, 复用其 config (但实际用 delegate 不 super.chat)
+        super(extractConfig(delegate));
         this.delegate = delegate;
         // CircuitBreaker: 50% 失败率 / 滑动窗口 10 calls / open 30s / half-open 3 calls
         this.circuitBreaker = CircuitBreaker.of("llmClient",
@@ -72,10 +75,25 @@ public class ResilientLlmClient {
     }
 
     /**
+     * 从 LlmClient 实例拿 config (用 reflection 访问 private 字段).
+     * 失败 fallback 到 default LlmConfig.
+     */
+    private static LlmConfig extractConfig(LlmClient llm) {
+        try {
+            java.lang.reflect.Field f = LlmClient.class.getDeclaredField("config");
+            f.setAccessible(true);
+            return (LlmConfig) f.get(llm);
+        } catch (Exception e) {
+            return new LlmConfig("dummy", "http://localhost", "dummy", 10);
+        }
+    }
+
+    /**
      * 调用 LLM,带 Resilience4j 装饰.
      * 链顺序: TimeLimiter → CircuitBreaker → Retry → delegate.chat
      */
-    public LlmClient.LlmResponse chat(List<Message> messages, List<Map<String, Object>> tools) throws Exception {
+    @Override
+    public LlmResponse chat(List<Message> messages, List<Map<String, Object>> tools) throws Exception {
         // 1. 构造 wrapped supplier (delegate.chat 把 checked exception 包装)
         Supplier<LlmClient.LlmResponse> wrappedChat = () -> {
             try {

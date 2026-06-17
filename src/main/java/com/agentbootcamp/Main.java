@@ -89,6 +89,11 @@ public class Main implements Runnable {
         defaultValue = "off")
     private String metricsPath;
 
+    @Option(names = {"--safe-mode"},
+        description = "Day 12: 用 Resilience4j 包装 LlmClient (CircuitBreaker 5xx + Retry + TimeLimiter 10s)/ Wrap LlmClient with Resilience4j (default enabled)",
+        defaultValue = "true")
+    private boolean safeMode;
+
     public static void main(String[] args) {
         int rc = new CommandLine(new Main()).execute(args);
         System.exit(rc);
@@ -134,7 +139,7 @@ public class Main implements Runnable {
     /** Day 1-7: 单 Agent 跑 / Single Agent run. */
     private void runSingleAgent(RagIndex ragIndex) throws Exception {
         LlmConfig config = LlmConfig.fromEnv();
-        LlmClient llm = new LlmClient(config);
+        LlmClient llm = createLlmClient(config);
         List<Tool> tools = buildTools(ragIndex);
         log("已注册 " + tools.size() + " 个工具: " + tools.stream().map(Tool::name).toList());
         MemoryManager memory = noMemory ? null : new MemoryManager();
@@ -170,7 +175,7 @@ public class Main implements Runnable {
      */
     private void runMultiAgent(RagIndex ragIndex) throws Exception {
         LlmConfig config = LlmConfig.fromEnv();
-        LlmClient llm = new LlmClient(config);
+        LlmClient llm = createLlmClient(config);
         List<Tool> tools = buildTools(ragIndex);
         MemoryManager memory = noMemory ? null : new MemoryManager();
         log("已注册 " + tools.size() + " 个工具: " + tools.stream().map(Tool::name).toList());
@@ -205,6 +210,22 @@ public class Main implements Runnable {
             } finally {
                 orch.stop();
             }
+        }
+    }
+
+    /**
+     * Day 12: 根据 --safe-mode flag 包装 LlmClient.
+     * safe-mode=true (默认) → ResilientLlmClient (CircuitBreaker + Retry + TimeLimiter)
+     * safe-mode=false → 原始 LlmClient (向后兼容 Day 1-11 行为)
+     */
+    private LlmClient createLlmClient(LlmConfig config) {
+        LlmClient raw = new LlmClient(config);
+        if (safeMode) {
+            log("Safe mode: ENABLED (Resilience4j: CircuitBreaker 50% + Retry 1s/2s/4s + TimeLimiter 10s)");
+            return new com.agentbootcamp.safety.ResilientLlmClient(raw);
+        } else {
+            log("Safe mode: DISABLED (raw LlmClient, no resilience)");
+            return raw;
         }
     }
 
