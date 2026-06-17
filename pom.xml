@@ -21,8 +21,10 @@
         <junit.version>5.10.3</junit.version>
         <!-- Day 11: Micrometer metrics facade + Prometheus text format exporter -->
         <micrometer.version>1.12.5</micrometer.version>
-        <!-- Day 9: 不引入外部 MCP SDK (官方 Java SDK 2026-06 还是 Kotlin-only,见 README Day 9 章节"Day 9 预知坑 #1")
+        <!-- Day 9: 不引入外部 MCP SDK (官方 Java SDK 2026-06 还是 Kotlin-only,见 README Day 9 章节"Day 9 预知坑 1")
              自己实现 MCP 协议子集 (JSON-RPC 2.0 over stdio, 跟 Python mcp PyPI 包协议级兼容) -->
+        <!-- Day 12: Resilience4j (CircuitBreaker + Retry + TimeLimiter 装饰 LlmClient,不改 LlmClient 本身) -->
+        <resilience4j.version>2.2.0</resilience4j.version>
     </properties>
 
     <dependencies>
@@ -51,6 +53,23 @@
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-registry-prometheus</artifactId>
             <version>${micrometer.version}</version>
+        </dependency>
+
+        <!-- Day 12: Resilience4j (CircuitBreaker 5xx 熔断 + Retry 指数退避 + TimeLimiter 10s 超时) -->
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-circuitbreaker</artifactId>
+            <version>${resilience4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-retry</artifactId>
+            <version>${resilience4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-timelimiter</artifactId>
+            <version>${resilience4j.version}</version>
         </dependency>
 
         <!-- Logging / 日志 -->
