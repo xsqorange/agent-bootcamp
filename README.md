@@ -28,8 +28,8 @@
 | **8** | **多 Agent 入门 / Multi-agent intro** | **Orchestrator + 1 Worker (`BlockingQueue` 消息协议)** | **✅** |
 | 9 | MCP 服务器 / MCP server | 跨语言工具互通 / cross-language tool interop | ✅ |
 | 10 | 3-Agent 团队 / 3-agent crew | Researcher / Critic / Editor | ✅ |
-| 11 | 可观测性 / Observability | OpenTelemetry + 成本统计 / cost tracking | ⏳ |
-| 12 | 安全 + 可靠性 / Safety + reliability | Resilience4j + prompt injection 防护 | ⏳ |
+| **11** | **可观测性 / Observability** | **Micrometer 1.12.5 + MetricsCollector (6 metric) + CostCalculator (7 厂商定价) + LlmClient/Agent 累加 + MetricsReporter + `-m/--metrics` flag / Micrometer 1.12.5 + MetricsCollector + CostCalculator + MetricsReporter + `-m/--metrics` flag** | **✅** |
+| **12** | **安全 + 可靠性 / Safety + reliability** | **Resilience4j 2.2.0 (CircuitBreaker + Retry + TimeLimiter) + PromptGuard (5 attack pattern) + ResilientLlmClient (decorator) + `--safe-mode` flag** | **✅** |
 | 13 | 部署 / Deploy | Docker + K8s + 健康检查 / health check | ⏳ |
 | 14 | 收尾发布 / Polish & ship | 双语博客 + demo + Release / bilingual blog + demo + release | ⏳ |
 
