@@ -301,6 +301,6 @@ Day 12 + 收尾完成后,回顾 Day 1-12,**累计学到**:
 
 ---
 
-**作者 / Author**: 码力全开 (`xsqorange@gmail.com`)
+**作者 / Author**: 码力全开 (`maliquankai123@gmail.com`)
 **License**: MIT
 **发表平台 / Publishing**: 同步发布于掘金 + Dev.to + Medium + GitHub Pages (1 周内)
