@@ -139,7 +139,8 @@ public class Main implements Runnable {
     /** Day 1-7: 单 Agent 跑 / Single Agent run. */
     private void runSingleAgent(RagIndex ragIndex) throws Exception {
         LlmConfig config = LlmConfig.fromEnv();
-        LlmClient llm = createLlmClient(config);
+        com.agentbootcamp.metrics.MetricsCollector metrics = new com.agentbootcamp.metrics.MetricsCollector();
+        LlmClient llm = createLlmClient(config, metrics);
         List<Tool> tools = buildTools(ragIndex);
         log("已注册 " + tools.size() + " 个工具: " + tools.stream().map(Tool::name).toList());
         MemoryManager memory = noMemory ? null : new MemoryManager();
@@ -148,8 +149,9 @@ public class Main implements Runnable {
             : "disabled"));
 
         try (TraceWriter trace = new TraceWriter(tracePath)) {
-            com.agentbootcamp.metrics.MetricsCollector metrics = new com.agentbootcamp.metrics.MetricsCollector();
-            Agent agent = new Agent(llm, tools, trace, maxSteps, maxCost, memory, metrics);
+            // Day 12 任务 1: PromptGuard 集成 - 工具执行后自动 scan + wrap
+            com.agentbootcamp.safety.PromptGuard promptGuard = new com.agentbootcamp.safety.PromptGuard();
+            Agent agent = new Agent(llm, tools, trace, maxSteps, maxCost, memory, metrics, promptGuard);
             RunResult result = agent.run(goal);
             System.out.println();
             System.out.println("=== Agent 回答 / Agent's answer ===");
@@ -175,7 +177,8 @@ public class Main implements Runnable {
      */
     private void runMultiAgent(RagIndex ragIndex) throws Exception {
         LlmConfig config = LlmConfig.fromEnv();
-        LlmClient llm = createLlmClient(config);
+        com.agentbootcamp.metrics.MetricsCollector metrics = new com.agentbootcamp.metrics.MetricsCollector();
+        LlmClient llm = createLlmClient(config, metrics);
         List<Tool> tools = buildTools(ragIndex);
         MemoryManager memory = noMemory ? null : new MemoryManager();
         log("已注册 " + tools.size() + " 个工具: " + tools.stream().map(Tool::name).toList());
@@ -217,12 +220,13 @@ public class Main implements Runnable {
      * Day 12: 根据 --safe-mode flag 包装 LlmClient.
      * safe-mode=true (默认) → ResilientLlmClient (CircuitBreaker + Retry + TimeLimiter)
      * safe-mode=false → 原始 LlmClient (向后兼容 Day 1-11 行为)
+     * @param metrics Day 11 MetricsCollector, 注入到 ResilientLlmClient 让 CB/Retry/TL 状态暴露
      */
-    private LlmClient createLlmClient(LlmConfig config) {
+    private LlmClient createLlmClient(LlmConfig config, com.agentbootcamp.metrics.MetricsCollector metrics) {
         LlmClient raw = new LlmClient(config);
         if (safeMode) {
-            log("Safe mode: ENABLED (Resilience4j: CircuitBreaker 50% + Retry 1s/2s/4s + TimeLimiter 10s)");
-            return new com.agentbootcamp.safety.ResilientLlmClient(raw);
+            log("Safe mode: ENABLED (Resilience4j: CircuitBreaker 50% + Retry 1s/2s/4s + TimeLimiter 10s, metrics=Day11)");
+            return new com.agentbootcamp.safety.ResilientLlmClient(raw, metrics);
         } else {
             log("Safe mode: DISABLED (raw LlmClient, no resilience)");
             return raw;
