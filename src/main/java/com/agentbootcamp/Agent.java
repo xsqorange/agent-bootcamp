@@ -42,6 +42,7 @@ public class Agent {
     private final double maxCostUsd;
     private final MemoryManager memory;     // Day 4
     private final com.agentbootcamp.metrics.MetricsCollector metrics;  // Day 11
+    private final com.agentbootcamp.safety.PromptGuard promptGuard;   // Day 12 任务 1: 集成 PromptGuard.wrap() 到 executeOneTool
 
     /**
      * 便捷构造器(5 参) — 不带 memory / Convenience constructor (5-param) — no memory.
@@ -49,7 +50,7 @@ public class Agent {
      */
     public Agent(LlmClient llm, List<Tool> tools, TraceWriter trace,
                  int maxSteps, double maxCostUsd) {
-        this(llm, tools, trace, maxSteps, maxCostUsd, null, null);
+        this(llm, tools, trace, maxSteps, maxCostUsd, null, null, null);
     }
 
     /**
@@ -57,7 +58,7 @@ public class Agent {
      */
     public Agent(LlmClient llm, List<Tool> tools, TraceWriter trace,
                  int maxSteps, double maxCostUsd, MemoryManager memory) {
-        this(llm, tools, trace, maxSteps, maxCostUsd, memory, null);
+        this(llm, tools, trace, maxSteps, maxCostUsd, memory, null, null);
     }
 
     /**
@@ -67,6 +68,18 @@ public class Agent {
     public Agent(LlmClient llm, List<Tool> tools, TraceWriter trace,
                  int maxSteps, double maxCostUsd, MemoryManager memory,
                  com.agentbootcamp.metrics.MetricsCollector metrics) {
+        this(llm, tools, trace, maxSteps, maxCostUsd, memory, metrics, null);
+    }
+
+    /**
+     * Day 12 任务 1: 加 PromptGuard (向后兼容,7 参 delegate 到 8 参 promptGuard=null).
+     * 工具执行后自动调 PromptGuard.scan() + PromptGuard.wrap() 防 LLM 误读工具结果。
+     * @param promptGuard PromptGuard 实例 (null = 不扫描, 不包裹, 原始 result 塞 messages)
+     */
+    public Agent(LlmClient llm, List<Tool> tools, TraceWriter trace,
+                 int maxSteps, double maxCostUsd, MemoryManager memory,
+                 com.agentbootcamp.metrics.MetricsCollector metrics,
+                 com.agentbootcamp.safety.PromptGuard promptGuard) {
         this.llm = llm;
         this.tools = tools.stream().collect(Collectors.toMap(Tool::name, t -> t));
         this.trace = trace;
@@ -74,10 +87,12 @@ public class Agent {
         this.maxCostUsd = maxCostUsd;
         this.memory = memory;
         this.metrics = metrics;
-        log.info("Agent 初始化: tools={}, maxSteps={}, maxCost=${}, memory={}, metrics={}",
+        this.promptGuard = promptGuard;
+        log.info("Agent 初始化: tools={}, maxSteps={}, maxCost=${}, memory={}, metrics={}, promptGuard={}",
             this.tools.keySet(), maxSteps, maxCostUsd,
             memory != null ? "enabled" : "disabled",
-            metrics != null ? "enabled" : "disabled");
+            metrics != null ? "enabled" : "disabled",
+            promptGuard != null ? "enabled" : "disabled");
     }
 
     /**
@@ -228,6 +243,19 @@ public class Agent {
             long dur = (System.nanoTime() - start) / 1_000_000;
             // Day 11: 累加 tool call metric (按 tool name 分 tag)
             if (metrics != null) metrics.recordToolCall(tc.function().name());
+            // Day 12 任务 1: PromptGuard 集成 - scan + wrap 防 LLM 误读
+            //   scan: 检测工具返回是否含 prompt injection (5 attack pattern)
+            //   wrap: 无论 clean/dirty 都用 <user_data tool="..."> 包裹,让 LLM 明确知道是 user data
+            //   (不阻断:Day 12 升级为"检测 + log",Day 13 升级为"检测 + 阻断抛异常")
+            if (promptGuard != null) {
+                com.agentbootcamp.safety.GuardResult scan =
+                    com.agentbootcamp.safety.PromptGuard.scan(tc.function().name(), result);
+                if (!scan.isClean()) {
+                    log.warn("[PromptGuard] Tool '{}' 输出命中 attack '{}' (LLM 可能被劫持,继续走但已包裹)",
+                        tc.function().name(), scan.getReason());
+                }
+                result = com.agentbootcamp.safety.PromptGuard.wrap(tc.function().name(), result);
+            }
             return new AgentStep.ToolExecutionRecord(
                 tc.id(), tc.function().name(), args, result, true, dur, null);
         } catch (Exception e) {
