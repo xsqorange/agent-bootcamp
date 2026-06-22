@@ -3,6 +3,7 @@ package com.agentbootcamp.safety;
 import com.agentbootcamp.LlmClient;
 import com.agentbootcamp.LlmConfig;
 import com.agentbootcamp.Message;
+import com.agentbootcamp.metrics.MetricsCollector;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.retry.Retry;
@@ -45,11 +46,22 @@ public class ResilientLlmClient extends LlmClient {
     private final Retry retry;
     private final TimeLimiter timeLimiter;
     private final ScheduledExecutorService scheduler;
+    /** Day 12 任务 2: MetricsCollector 集成 - CircuitBreaker / Retry / TimeLimiter 状态暴露 */
+    private final MetricsCollector metrics;
 
     public ResilientLlmClient(LlmClient delegate) {
+        this(delegate, null);
+    }
+
+    /**
+     * Day 12 任务 2: 加 MetricsCollector (向后兼容, 1 参 delegate 到 2 参 metrics=null).
+     * CircuitBreaker 状态切换 + Retry 触发 + TimeLimiter 超时都暴露到 Micrometer.
+     */
+    public ResilientLlmClient(LlmClient delegate, MetricsCollector metrics) {
         // 调 LlmClient 单参构造, 复用其 config (但实际用 delegate 不 super.chat)
         super(extractConfig(delegate));
         this.delegate = delegate;
+        this.metrics = metrics;
         // CircuitBreaker: 50% 失败率 / 滑动窗口 10 calls / open 30s / half-open 3 calls
         this.circuitBreaker = CircuitBreaker.of("llmClient",
             CircuitBreakerConfig.custom()
@@ -72,6 +84,24 @@ public class ResilientLlmClient extends LlmClient {
                 .timeoutDuration(Duration.ofSeconds(10))
                 .build());
         this.scheduler = Executors.newScheduledThreadPool(2);
+
+        // Day 12 任务 2: 订阅 CircuitBreaker 状态切换 → Micrometer agent_steps_total
+        // 5 状态: CLOSED / OPEN / HALF_OPEN / DISABLED / FORCED_OPEN
+        if (metrics != null) {
+            this.circuitBreaker.getEventPublisher().onStateTransition(event -> {
+                String newState = event.getStateTransition().getToState().name();
+                log.info("[Resilience4j] CircuitBreaker 状态切换: {} → {}",
+                    event.getStateTransition().getFromState(), newState);
+                metrics.recordAgentStep("circuit_" + newState);
+            });
+            // Retry 每次尝试 → tool_calls_total{tool=retry}
+            this.retry.getEventPublisher().onRetry(event -> {
+                log.info("[Resilience4j] Retry attempt #{} (lastException: {})",
+                    event.getNumberOfRetryAttempts(),
+                    event.getLastThrowable() != null ? event.getLastThrowable().getClass().getSimpleName() : "null");
+                metrics.recordToolCall("retry_attempt");
+            });
+        }
     }
 
     /**
@@ -115,6 +145,8 @@ public class ResilientLlmClient extends LlmClient {
             if (e instanceof TimeoutException) {
                 future.cancel(true);
                 log.warn("LLM call 超时 10s (TimeLimiter 触发)");
+                // Day 12 任务 2: TimeLimiter 超时 → Micrometer agent_steps_total
+                if (metrics != null) metrics.recordAgentStep("timelimit_timeout");
                 throw new RuntimeException("LLM call timed out after 10s", e);
             }
             Throwable cause = e.getCause();
