@@ -121,6 +121,20 @@
                                     <mainClass>com.agentbootcamp.Main</mainClass>
                                 </transformer>
                             </transformers>
+                            <!-- Day 12 任务 3: 排除 META-INF 重叠文件,消 LICENSE/SF/DSA 警告 -->
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                        <exclude>module-info.class</exclude>
+                                        <exclude>META-INF/LICENSE*</exclude>
+                                        <exclude>META-INF/NOTICE*</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
                         </configuration>
                     </execution>
                 </executions>
