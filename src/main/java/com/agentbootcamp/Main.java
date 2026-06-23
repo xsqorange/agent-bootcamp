@@ -42,7 +42,7 @@ public class Main implements Runnable {
 
     @Option(names = {"-g", "--goal"},
         description = "用户目标(必填)/ User goal (required)",
-        required = true)
+        required = false)
     private String goal;
 
     @Option(names = {"--max-steps"},
@@ -111,6 +111,13 @@ public class Main implements Runnable {
 
         @Override
         public void run() {
+            // Day 13: --server 模式不要求 --goal,只有 CLI 跑 goal 模式才必须
+            if (!serverMode && (goal == null || goal.isBlank())) {
+                System.err.println("错误: 必须传 --goal (或用 --server 起 HTTP server)");
+                System.err.println("Error: --goal is required (or pass --server to start HTTP server)");
+                CommandLine.usage(this, System.err);
+                System.exit(2);
+            }
             // Day 13: --server 模式: 启 HTTP server 替代 CLI
             if (serverMode) {
                 runHttpServer();

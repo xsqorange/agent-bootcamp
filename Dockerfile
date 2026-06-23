@@ -6,6 +6,10 @@
 FROM eclipse-temurin:17-jdk-alpine AS build
 WORKDIR /src
 COPY . /src
+# mvnw 在 Windows 提交流程下: (1) mode=100644 丢 +x 位 (2) 换行变成 CRLF,busybox /bin/sh 把 "\r" 当成 shebang 解释器一部分
+# → 直接 ./mvnw 报 "/bin/sh: ./mvnw: not found" (exit 127)
+# 修法:chmod 加 +x 位 + sed 去 CR
+RUN chmod +x mvnw && sed -i 's/\r$//' mvnw && head -1 mvnw
 # 编译 + 打 fat-jar (mvn package 跳过 test 节省时间)
 RUN ./mvnw -B package -DskipTests
 
