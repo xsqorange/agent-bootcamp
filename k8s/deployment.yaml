@@ -1,0 +1,143 @@
+# Day 13: K8s Deployment + Service + ConfigMap
+# 中文: 1 replica + livenessProbe /health/liveness + readinessProbe /health/readiness
+#       + resources.limits (cpu 1 + mem 1Gi) + env 从 Secret 读
+# English: 1 replica + liveness/readiness probes + resource limits + env from Secret
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-bootcamp
+  labels:
+    app: agent-bootcamp
+    version: v0.1.0
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agent-bootcamp
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: agent-bootcamp
+        version: v0.1.0
+    spec:
+      containers:
+        - name: agent-bootcamp
+          # 镜像: 在 K8s 上跑前先 docker build + push 到 registry
+          # 例如: docker build -t ghcr.io/xsqorange/agent-bootcamp:v0.1.0 . && docker push ...
+          image: ghcr.io/xsqorange/agent-bootcamp:v0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          # Day 13: 关键差异
+          #   liveness  ≠ "model 在响应" — 是 "loop 没卡死"
+          #   readiness ≠ "有可用 token"  — 是 "config + 依赖都通"
+          livenessProbe:
+            httpGet:
+              path: /health/liveness
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health/readiness
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          env:
+            # LLM API key 必须放 Secret (不写死)
+            - name: MINIMAX_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: agent-bootcamp-secrets
+                  key: MINIMAX_API_KEY
+            # 其他配置可走 ConfigMap
+            - name: LLM_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-bootcamp-config
+                  key: LLM_BASE_URL
+            - name: LLM_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-bootcamp-config
+                  key: LLM_MODEL
+            # Day 12: 默认开 safe-mode
+            - name: SAFE_MODE
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-bootcamp-config
+                  key: SAFE_MODE
+          resources:
+            # 防单次会话吃光节点
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          # JVM 调优 (G1GC + 容器内存感知)
+          envFrom:
+            - configMapRef:
+                name: agent-bootcamp-jvm
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-bootcamp
+  labels:
+    app: agent-bootcamp
+spec:
+  type: ClusterIP
+  selector:
+    app: agent-bootcamp
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+# ConfigMap: 公开配置 (无 key)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-bootcamp-config
+data:
+  LLM_BASE_URL: "https://api.minimaxi.com/v1"
+  LLM_MODEL: "minimax-m3"
+  SAFE_MODE: "true"
+---
+# ConfigMap: JVM 参数
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-bootcamp-jvm
+data:
+  JAVA_TOOL_OPTIONS: >-
+    -XX:+UseG1GC
+    -XX:MaxRAMPercentage=75.0
+    -Dfile.encoding=UTF-8
+---
+# Secret 模板 (用户需手动创建 + 填 key)
+# kubectl create secret generic agent-bootcamp-secrets --from-literal=MINIMAX_API_KEY=sk-cp-your-key
+apiVersion: v1
+kind: Secret
+metadata:
+  name: agent-bootcamp-secrets
+  annotations:
+    "kubectl.kubernetes.io/last-applied-configuration": |
+      注意: Secret 必须手动创建 (含 MINIMAX_API_KEY), 不能 commit 到 git!
+type: Opaque
+stringData:
+  MINIMAX_API_KEY: "sk-cp-REPLACE-ME"

@@ -1,0 +1,15 @@
+# Day 13: Prometheus scrape 配置 (跟 docker-compose "monitoring" profile 配)
+# 中文: scrape agent-bootcamp /metrics 端点 (Day 11 Prometheus format)
+# English: scrape agent-bootcamp /metrics endpoint
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'agent-bootcamp'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['agent-bootcamp:8080']
+        labels:
+          app: 'agent-bootcamp'
+          env: 'docker-compose'

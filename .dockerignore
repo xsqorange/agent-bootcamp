@@ -1,0 +1,17 @@
+# Day 13: .dockerignore (加速 docker build, 排除 target/ .git 等)
+target/
+.git/
+.gitattributes
+.gitignore
+.idea/
+*.iml
+.vscode/
+*.log
+docs/blog/
+evals/reports/
+target/test-trace*.jsonl
+node_modules/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.md.bak
