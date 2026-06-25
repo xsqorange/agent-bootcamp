@@ -1,0 +1,47 @@
+# Force LF line endings for shell scripts on all platforms
+# Force LF line endings: required for the Maven wrapper to run on Linux CI.
+# 强制 LF 换行符：Linux CI 跑 mvnw 必须 LF (Windows 用户用 Git Bash 也 OK)
+
+# Maven wrapper — must be LF + executable (100755)
+# Maven wrapper 脚本 — 必须 LF + 可执行
+mvnw     text eol=lf
+mvnw.cmd text eol=crlf
+
+# Shell scripts in scripts/ — must be LF + executable
+# 脚本目录里的 shell 脚本 — 必须 LF + 可执行
+*.sh     text eol=lf
+*.bash   text eol=lf
+
+# Java/Kotlin/Scala source — LF (cross-platform consistent)
+# Java/Kotlin/Scala 源码 — LF (跨平台一致)
+*.java   text eol=lf
+*.kt     text eol=lf
+*.scala  text eol=lf
+
+# Build/config files — LF (avoids CRLF surprises in YAML/JSON/TOML parsing)
+# 构建/配置文件 — LF (避免 YAML/JSON/TOML 解析时的 CRLF 陷阱)
+*.xml    text eol=lf
+*.yml    text eol=lf
+*.yaml   text eol=lf
+*.json   text eol=lf
+*.toml   text eol=lf
+*.properties text eol=lf
+
+# Markdown — keep CRLF on Windows for compatibility, LF on Linux
+# Markdown — Windows 保留 CRLF, Linux 用 LF
+*.md     text eol=lf
+
+# Git attributes itself — LF
+# 本文件 — LF
+.gitattributes text eol=lf
+
+# Binary files — no conversion
+# 二进制文件 — 不转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.jar binary
+*.war binary
+*.class binary

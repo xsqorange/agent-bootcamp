@@ -20,6 +20,17 @@ jobs:
           java-version: '17'
           cache: maven
 
+      - name: Ensure mvnw is executable and LF (CI robustness)
+        # Windows 上传的 mvnw 偶尔 mode 100644 或 CRLF,Linux 跑不了
+        # 在 Linux runner 上强制修复,不依赖 git mode
+        run: |
+          set -e
+          chmod +x mvnw
+          # 把 CRLF 强制转 LF (以防 core.autocrlf 在 checkout 时把 LF 改成 CRLF)
+          sed -i 's/\r$//' mvnw
+          file mvnw
+          ls -la mvnw
+
       - name: Run unit tests (fast, no LLM)
         run: ./mvnw -B test
 
