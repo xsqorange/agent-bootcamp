@@ -6,6 +6,7 @@
 [![Java 17](https://img.shields.io/badge/Java-17-blue.svg)](https://openjdk.org/projects/jdk/17/)
 [![Maven](https://img.shields.io/badge/Maven-3.9+-orange.svg)](https://maven.apache.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/xsqorange/agent-bootcamp)](https://github.com/xsqorange/agent-bootcamp/releases/latest)
 [![Build Status](https://github.com/xsqorange/agent-bootcamp/actions/workflows/build.yml/badge.svg)](https://github.com/xsqorange/agent-bootcamp/actions/workflows/build.yml)
 
 ## 简介 / Overview
@@ -30,8 +31,8 @@
 | 10 | 3-Agent 团队 / 3-agent crew | Researcher / Critic / Editor | ✅ |
 | **11** | **可观测性 / Observability** | **Micrometer 1.12.5 + MetricsCollector (6 metric) + CostCalculator (7 厂商定价) + LlmClient/Agent 累加 + MetricsReporter + `-m/--metrics` flag / Micrometer 1.12.5 + MetricsCollector + CostCalculator + MetricsReporter + `-m/--metrics` flag** | **✅** |
 | **12** | **安全 + 可靠性 / Safety + reliability** | **Resilience4j 2.2.0 (CircuitBreaker + Retry + TimeLimiter) + PromptGuard (5 attack pattern) + ResilientLlmClient (decorator) + `--safe-mode` flag** | **✅** |
-| 13 | 部署 / Deploy | Docker + K8s + 健康检查 / health check | ⏳ |
-| 14 | 收尾发布 / Polish & ship | 双语博客 + demo + Release / bilingual blog + demo + release | ⏳ |
+| 13 | 部署 / Deploy | HttpServer (5 端点) + Dockerfile (multi-stage) + K8s (liveness + readiness) + docs/deploy.md | ✅ |
+| 14 | 收尾发布 / Polish & ship | 14 篇博客 (~36K 中文字符) + 终极 demo + GitHub Release v0.1.0 | ✅ |
 
 
 ## 快速开始 / Quick Start
