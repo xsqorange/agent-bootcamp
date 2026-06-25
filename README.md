@@ -1043,7 +1043,9 @@ Agent steps: FINAL_ANSWER=1
 - [x] 15 单元测试全过 (11 PromptGuard + 4 ResilientLlmClient,真 10s TimeLimiter timeout 验证)
 - [x] README Day 12 完整章节 (本文) + 进度日志 Day 12 行
 
-## 配置 LLM Provider / Configuring LLM Providers
+## Day 13 架构 / Day 13 Architecture (部署 / Deploy)
+
+**Day 12 → Day 13 的本质变化**:Agent 从 **CLI 工具升级为 HTTP 服务 + Docker 镜像 + K8s 部署清单**。JDK 内置 `com.sun.net.httpserver` (0 新依赖) 起 HTTP server,4 端点 + Dockerfile multi-stage (Java 17 JRE-alpine ~200MB) + docker-compose + K8s deployment + 完整 deploy.md 文档。K8s **liveness ≠ "model 在响应"**(是 loop 没卡死),**readiness ≠ "有可用 token"**(是 config + 依赖都通)。
 
 默认走 **OpenAI**。要切到别的厂商,改环境变量即可:
 Default is **OpenAI**. To switch, just set environment variables:

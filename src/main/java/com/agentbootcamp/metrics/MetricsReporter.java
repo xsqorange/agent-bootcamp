@@ -24,6 +24,17 @@ import java.util.stream.Collectors;
 public class MetricsReporter {
 
     /**
+     * Day 13: 输出 Prometheus text 格式 (HTTP server /metrics 端点用).
+     * 直接调 Micrometer PrometheusMeterRegistry.scrape() 拿到标准 Prometheus text 格式.
+     */
+    public static String printPrometheus(MetricsCollector mc) {
+        if (mc.getRegistry() instanceof io.micrometer.prometheus.PrometheusMeterRegistry prom) {
+            return prom.scrape();
+        }
+        return "# metrics registry 不是 PrometheusMeterRegistry\n";
+    }
+
+    /**
      * 生成 summary 报告 (stdout 友好格式).
      * @param mc 跑了若干次 LLM call + tool call + agent step 的 MetricsCollector
      * @return 人类可读 summary

@@ -42,7 +42,7 @@ public class Main implements Runnable {
 
     @Option(names = {"-g", "--goal"},
         description = "用户目标(必填)/ User goal (required)",
-        required = true)
+        required = false)
     private String goal;
 
     @Option(names = {"--max-steps"},
@@ -90,22 +90,44 @@ public class Main implements Runnable {
     private String metricsPath;
 
     @Option(names = {"--safe-mode"},
-        description = "Day 12: 用 Resilience4j 包装 LlmClient (CircuitBreaker 5xx + Retry + TimeLimiter 10s)/ Wrap LlmClient with Resilience4j (default enabled)",
-        defaultValue = "true")
-    private boolean safeMode;
+            description = "Day 12: 用 Resilience4j 包装 LlmClient (CircuitBreaker 5xx + Retry + TimeLimiter 10s)/ Wrap LlmClient with Resilience4j (default enabled)",
+            defaultValue = "true")
+        private boolean safeMode;
 
-    public static void main(String[] args) {
-        int rc = new CommandLine(new Main()).execute(args);
-        System.exit(rc);
-    }
+        @Option(names = {"--server"},
+            description = "Day 13: 起 HTTP server (替代 CLI 跑 goal) — 端点 /health /metrics /api/run / Start HTTP server instead of running goal (for K8s deploy)",
+            defaultValue = "false")
+        private boolean serverMode;
 
-    @Override
-    public void run() {
-        try {
-            log("目标 / Goal: " + goal);
-            log("参数 / Args: maxSteps=" + maxSteps + ", maxCost=$" + maxCost
-                + ", trace=" + tracePath + ", memory=" + (noMemory ? "off" : "on")
-                + ", multiAgent=" + multiAgent);
+        @Option(names = {"--server-port"},
+            description = "Day 13: HTTP server 端口 (默认 8080) / HTTP server port",
+            defaultValue = "8080")
+        private int serverPort;
+
+        public static void main(String[] args) {
+            int rc = new CommandLine(new Main()).execute(args);
+            System.exit(rc);
+        }
+
+        @Override
+        public void run() {
+            // Day 13: --server 模式不要求 --goal,只有 CLI 跑 goal 模式才必须
+            if (!serverMode && (goal == null || goal.isBlank())) {
+                System.err.println("错误: 必须传 --goal (或用 --server 起 HTTP server)");
+                System.err.println("Error: --goal is required (or pass --server to start HTTP server)");
+                CommandLine.usage(this, System.err);
+                System.exit(2);
+            }
+            // Day 13: --server 模式: 启 HTTP server 替代 CLI
+            if (serverMode) {
+                runHttpServer();
+                return;
+            }
+            try {
+                log("目标 / Goal: " + goal);
+                log("参数 / Args: maxSteps=" + maxSteps + ", maxCost=$" + maxCost
+                    + ", trace=" + tracePath + ", memory=" + (noMemory ? "off" : "on")
+                    + ", multiAgent=" + multiAgent);
 
             // 0. 加载知识库 (Day 4)
             Path knowledgeDir = findKnowledgeDir();
@@ -136,8 +158,31 @@ public class Main implements Runnable {
         }
     }
 
-    /** Day 1-7: 单 Agent 跑 / Single Agent run. */
-    private void runSingleAgent(RagIndex ragIndex) throws Exception {
+    /**
+         * Day 13: 起 HTTP server (替代 CLI 跑 goal). K8s/docker-compose 用 /health 探活, /metrics scrape.
+         */
+        private void runHttpServer() {
+            com.agentbootcamp.metrics.MetricsCollector metrics = new com.agentbootcamp.metrics.MetricsCollector();
+            var server = new com.agentbootcamp.server.HttpServerMain(serverPort, metrics);
+            try {
+                server.start();
+                log("Day 13 HTTP server 起: http://0.0.0.0:" + serverPort);
+                log("端点: /health /health/liveness /health/readiness /metrics");
+                log("按 Ctrl+C 停止 / Press Ctrl+C to stop");
+                // 阻塞主线程
+                Thread.currentThread().join();
+            } catch (Exception e) {
+                log("HTTP server 启动失败: " + e.getMessage());
+                System.exit(1);
+            } finally {
+                server.stop();
+            }
+        }
+
+        /**
+         * Day 1-7: 单 Agent 跑 / Single Agent run.
+         */
+        private void runSingleAgent(RagIndex ragIndex) throws Exception {
         LlmConfig config = LlmConfig.fromEnv();
         com.agentbootcamp.metrics.MetricsCollector metrics = new com.agentbootcamp.metrics.MetricsCollector();
         LlmClient llm = createLlmClient(config, metrics);
