@@ -20,7 +20,7 @@ Java 源码根目录:`src/main/java/com/agentbootcamp/`。功能子包:
 
 `src/main/resources/knowledge/` 存放 RAG 知识库(5 个 Markdown 文件,被 `RagIndex` 加载)。测试代码镜像主包结构,放在 `src/test/java/` 下。黄金评测用例位于 `evals/cases/`(共 10 个,例如 `01-write-file-creates.json`),`evals/reports/` 是 gitignored 输出。`mcp-client/` 是跨语言 Python 客户端(仅依赖 stdlib,零外部依赖)。`k8s/` 存放 Kubernetes 清单(Deployment + Service + Secret 模板),`docker-compose.yml` 用于本地容器编排,可选 Prometheus profile。
 
-**路线图**:14 天速成;Day 1-12 已完成,Day 13(部署)在本分支(`day13`)进行中,Day 14(收尾发布)待开始。详细见 [README.md](README.md) 中的日进度表。
+**路线图**:14 天速成全部完工 ✅, 已发布 `v0.1.0`。详细见 [README.md](README.md) 中的日进度表。
 
 
 ## 构建、测试与开发命令 / Build, Test, and Development Commands

@@ -18,7 +18,7 @@ Java source root is `src/main/java/com/agentbootcamp/`. Feature sub-packages:
 
 `src/main/resources/knowledge/` holds the RAG knowledge base (five Markdown files consumed by `RagIndex`). Tests mirror the main package under `src/test/java/`. Golden eval cases live in `evals/cases/` (10 cases, e.g. `01-write-file-creates.json`); `evals/reports/` is gitignored output. `mcp-client/` is the cross-language Python client (stdlib only, zero dependencies). `k8s/` holds the Kubernetes manifests (Deployment + Service + Secret template) and `docker-compose.yml` orchestrates local container runs with an optional Prometheus profile.
 
-Roadmap: 14-day sprint; Days 1-12 are done, Day 13 (deploy) is in progress on this branch (`day13`), Day 14 (polish & ship) is pending. See [README.md](README.md) for the per-day table.
+Roadmap: 14-day sprint; Days 1-14 are **complete** ✅, shipped as `v0.1.0`. See [README.md](README.md) for the per-day table.
 
 
 ## Build, Test, and Development Commands
